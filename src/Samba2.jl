@@ -1,7 +1,6 @@
 module Samba2
 
-import LuxCore, Lux, NNlib
-
+import LuxCore, Lux, NNlib, Random
 
 cl = 1024
 dim = 128
@@ -10,83 +9,71 @@ struct SWAttention <: Lux.AbstractLuxLayer
     sequence_length::Int
     dimension::Int
     number_of_heads::Int
-    Q_projection::Lux.Dense
-    K_projection::Lux.Dense
-    V_projection::Lux.Dense
-    OUTPUT_projection::Lux.Dense
+    Q::Lux.Dense
+    K::Lux.Dense
+    V::Lux.Dense
+    OUTPUT::Lux.Dense
 end
-
 
 function Lux.initialparameters(rng::Random.AbstractRNG, block::SWAttention)
-    q_projection = Lux.initialparameters(rng, block.Q_projection)
-    k_projection = Lux.initialparameters(rng, block.K_projection)
-    v_projection = Lux.initialparameters(rng, block.V_projection)
-    output_projection = Lux.initialparameters(rng, block.OUTPUT_projection)
+    q = Lux.initialparameters(rng, block.Q)
+    k = Lux.initialparameters(rng, block.K)
+    v = Lux.initialparameters(rng, block.V)
+    output = Lux.initialparameters(rng, block.OUTPUT)
 
 
-    return (
-        Q_projection = q_projection,
-        K_projection = k_projection,
-        V_projection = v_projection,
-        OUTPUT_projection = output_projection,
-    )
+    return (q = q, k = k, v = v, output = output)
 end
 
-function SWAttention (sequence_length::Int, dimension::Int, number_of_heads::Int)
+function SWAttention(sequence_length::Int, dimension::Int, number_of_heads::Int)
     @assert dimension % number_of_heads == 0 "dimension must be divisible by number_of_heads" # we want perfect division
-    sub_dimension = div(layer.dimension, layer.number_of_heads)
-    Q=Lux.Dense(dimension => sub_dimension) 
-    K=Lux.Dense(dimension => sub_dimension) 
-    V=Lux.Dense(dimension => sub_dimension) 
-    OUT=Lux.Dense(dimension => dimension) 
-    return SWAttention(sequence_length, dimension, number_of_heads, Q, K, V, OUT)
+    # sub_dimension = div(dimension, number_of_heads)
+    Q = Lux.Dense(dimension => dimension)
+    K = Lux.Dense(dimension => dimension)
+    V = Lux.Dense(dimension => dimension)
+    OUTPUT = Lux.Dense(dimension => dimension)
+    return SWAttention(sequence_length, dimension, number_of_heads, Q, K, V, OUTPUT)
 end
 
 
 function Lux.initialstates(rng::Random.AbstractRNG, block::SWAttention)
-    q_projection = Lux.initialparameters(block.dimension, block.Q_projection)
-    k_projection = Lux.initialparameters(rng, block.K_projection)
-    v_projection = Lux.initialparameters(rng, block.V_projection)
-    output_projection = Lux.initialparameters(rng, block.OUTPUT_projection)
-
-
-    return (
-        Q_projection = q_projection,
-        K_projection = k_projection,
-        V_projection = v_projection,
-        OUTPUT_projection = output_projection,
-    )
+    return (;)
 end
 
 @inline function normalized_sigmoids(seq; τ = 1.0, eps = 1e-12)
     sigmoids = NNlib.sigmoid.(seq ./ τ)
-    s = reduce(+, sigmoids) + eps
     s = sum(sigmoids) + eps
     map!(x -> x / s, sigmoids, sigmoids)
     return sigmoids
 end
 
 function (block::SWAttention)(x, params::NamedTuple, _state::NamedTuple)
-    (;Q_projection, K_projection, V_projection, OUTPUT_projection) = params
+    state = (;)
+    q, _ = block.Q(x, params.q, state)
+    k, _ = block.K(x, params.k, state)
+    v, _ = block.V(x, params.v, state)
 
-    Q, _ = Q_projection(x)
-    K, _ = K_projection(x)
-    V, _ = V_projection(x)
-    d_k =   size(Q, 1)  
-    # scores = (transpose(Q) * K)/sqrt(d_k)
-    scores = (Q' * K)/ √(d_k)
-    weights = similar(scores)
-  
-     for i in axes(scores,1) # 1:size(scores, 1) 
-        weights[i,:] =  normalized_sigmoids(@view scores[i,:])
+
+    d_k = div(size(q, 1), block.number_of_heads)
+
+    T = size(q, 2)
+    # weights = Matrix(size(q, 1),)
+    Q_heads = reshape(q, d_k, block.number_of_heads, T) |> x -> eachslice(x; dims = 2)
+    K_heads = reshape(k, d_k, block.number_of_heads, T) |> x -> eachslice(x; dims = 2)
+    V_heads = reshape(v, d_k, block.number_of_heads, T) |> x -> eachslice(x; dims = 2)
+
+    head_outputs = map(Q_heads, K_heads, V_heads) do q_row, k_row, v_row
+        Yh =
+            q_row' * k_row / √d_k |>
+            (x -> eachslice(x; dims = 1)) |>
+            (row -> map(normalized_sigmoids, row)) |>
+            (x -> (v_row * reduce(hcat, x)))
+        return Yh
     end
 
-    Y = V*weights
 
-    output, _ = OUTPUT_projection(Y)
-    return(output, _state)
-
+    out, _ = reduce(vcat, head_outputs) |> Y -> block.OUTPUT(Y, params.output, state)
+    return out, (;)
 end
-
 
 end
