@@ -1,1 +1,5 @@
 [deps]
+Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
+LuxCore = "bb33d45b-7691-41d6-9220-0943567d0623"
+NNlib = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"
+Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
