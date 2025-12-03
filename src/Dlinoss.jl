@@ -16,7 +16,6 @@ end
 # 1. PARAMETER INITIALIZATION
 function Lux.initialparameters(rng::Random.AbstractRNG, layer::DLinOSS)
 
-    # A (Stiffness/Frequency)
     log_stiffness_coefficients = collect(
         range(
             log(layer.min_frequency),
@@ -25,17 +24,13 @@ function Lux.initialparameters(rng::Random.AbstractRNG, layer::DLinOSS)
         ),
     )
 
-    # dt (Time Step)
     log_time_step = ones(Float32, layer.state_dimensions) .* log(layer.dt)
 
-    # G (Damping)
     log_damping_coefficients = ones(Float32, layer.state_dimensions) .* log(0.01f0)
 
-    # B (Input -> State)
     input_projection =
         randn(rng, Float32, layer.state_dimensions, layer.input_dimensions) .* 0.02f0
 
-    # C (State -> Output)
     output_projection =
         randn(rng, Float32, layer.output_dimensions, layer.state_dimensions) .* 0.02f0
 
@@ -50,8 +45,7 @@ end
 
 # 2. STATE INITIALIZATION
 function Lux.initialstates(_rng::Random.AbstractRNG, layer::DLinOSS)
-    # Default State: (2, N) for a single item. 
-    # This will be broadcasted to the batch size dynamically in the forward pass.
+    # State is (2, N). Row 1 = Velocity, Row 2 = Position.
     (oscillator_state = zeros(Float32, 2, layer.state_dimensions),)
 end
 
@@ -61,18 +55,18 @@ function (layer::DLinOSS)(token_sequence::AbstractArray, params, state)
     # ---------------------------------------------------------
     # A. Handle Batch Dimensions
     # ---------------------------------------------------------
-    # We standardize input to 3D: (Features, Time, Batch)
     is_batched = ndims(token_sequence) == 3
 
-    # If not batched, reshape to (F, T, 1) for consistent math
-    input_3d =
+    # Reshape to (Features, Time, Batch) if needed
+    standardized_input_tensor =
         is_batched ? token_sequence :
         reshape(token_sequence, size(token_sequence, 1), size(token_sequence, 2), 1)
 
-    (number_of_features, number_of_timesteps, number_of_batches) = size(input_3d)
+    (number_of_features, number_of_timesteps, number_of_batches) =
+        size(standardized_input_tensor)
 
     # ---------------------------------------------------------
-    # B. Unpack and constrain parameters
+    # B. Unpack Parameters
     # ---------------------------------------------------------
     (;
         log_time_step,
@@ -87,115 +81,110 @@ function (layer::DLinOSS)(token_sequence::AbstractArray, params, state)
     damping_coefficients = exp.(log_damping_coefficients)
 
     # ---------------------------------------------------------
-    # C. Pre-calculate IMEX Physics Operators
+    # C. Physics Operators
     # ---------------------------------------------------------
-
-    # The term (1 + dt * G)^-1
     implicit_damping_factor = 1.0f0 ./ (1.0f0 .+ time_step .* damping_coefficients)
-
-    # How much velocity survives the friction per step
     velocity_retention_rate = implicit_damping_factor
-
-    # How much the spring pulls the velocity back (Negative Feedback)
     spring_stiffness_coupling =
         -time_step .* stiffness_coefficients .* implicit_damping_factor
-
-    # How much the input signal adds to the velocity
     input_force_gain = time_step .* implicit_damping_factor
 
     # ---------------------------------------------------------
-    # D. Execution (The Scan)
+    # D. Input Projection (The Fold)
     # ---------------------------------------------------------
+    input_flattened_time_batch = reshape(standardized_input_tensor, number_of_features, :)
+    projected_input_flattened = input_projection * input_flattened_time_batch
 
-    # 1. Project Input: Fold Batch into Time to use Matrix Multiplication
-    # Reshape (Features, Time, Batch) -> (Features, Time * Batch)
-    input_flattened = reshape(input_3d, number_of_features, :)
-
-    # Matrix Multiply: (State, Features) * (Features, Time * Batch) -> (State, Time * Batch)
-    projected_input_flattened = input_projection * input_flattened
-
-    # Unfold back to 3D: (State, Time, Batch)
-    projected_input_3d = reshape(
+    # Unfold to (State, Time, Batch)
+    projected_input_3d_tensor = reshape(
         projected_input_flattened,
         layer.state_dimensions,
         number_of_timesteps,
         number_of_batches,
     )
+    input_sequence_iterator = eachslice(projected_input_3d_tensor, dims = 2)
 
-    # Create Iterator: Each slice is a (State, Batch) matrix for a single time step
-    input_sequence_iterator = eachslice(projected_input_3d, dims = 2)
+    # ---------------------------------------------------------
+    # E. Execution (Stacked Matrix Scan)
+    # ---------------------------------------------------------
 
-    # 2. Define the Single-Step Physics Logic
+    # Step function now takes a Single Matrix 'current_state' (2*N, Batch)
+    # Top Half = Velocity, Bottom Half = Position
     evolve_state =
-        (current_state_tuple, current_input_matrix) -> begin
+        (current_stacked_state, current_input_matrix) -> begin
 
-            # Unpack tuple of (N, B) matrices
-            previous_velocity, previous_position = current_state_tuple
+            # Slicing is Zygote-safe
+            previous_velocity = current_stacked_state[1:layer.state_dimensions, :]
+            previous_position = current_stacked_state[(layer.state_dimensions+1):end, :]
 
-            # Physics Update (Broadcasting (N,) vs (N, B) happens automatically)
+            # Physics Update
             next_velocity =
                 (velocity_retention_rate .* previous_velocity) .+
                 (spring_stiffness_coupling .* previous_position) .+
                 (input_force_gain .* current_input_matrix)
 
-            # Symplectic Position Update (Use next_velocity for stability)
             next_position = previous_position .+ (time_step .* next_velocity)
 
-            return (next_velocity, next_position)
+            # Stack vertically: Velocity on Top, Position on Bottom
+            return vcat(next_velocity, next_position)
         end
 
-    # 3. Initialize Batch State
-    # We must repeat the initial state vector to match the batch size
-    initial_velocity_vector = @view state.oscillator_state[1, :]
-    initial_position_vector = @view state.oscillator_state[2, :]
+    # Initialize Batch State (Stacked)
+    initial_velocity_view = @view state.oscillator_state[1, :]
+    initial_position_view = @view state.oscillator_state[2, :]
 
-    # Repeat: (N,) -> (N, Batch)
-    initial_velocity_batch = repeat(initial_velocity_vector, 1, number_of_batches)
-    initial_position_batch = repeat(initial_position_vector, 1, number_of_batches)
+    # Vertically stack initial vectors -> (2*N, )
+    initial_stacked_vector = vcat(initial_velocity_view, initial_position_view)
 
-    initial_state_tuple = (initial_velocity_batch, initial_position_batch)
+    # Repeat across batch -> (2*N, Batch)
+    initial_stacked_batch = repeat(initial_stacked_vector, 1, number_of_batches)
 
-    # 4. Run Scan
-    # Returns Vector of ((N, B), (N, B)) tuples
+    # Run Scan (History is Vector of Matrices)
     state_history =
-        accumulate(evolve_state, input_sequence_iterator; init = initial_state_tuple)
+        accumulate(evolve_state, input_sequence_iterator; init = initial_stacked_batch)
 
     # ---------------------------------------------------------
-    # E. Output Formatting
+    # F. Output Formatting
     # ---------------------------------------------------------
 
-    # Extract positions: Vector of (N, B)
-    position_history = map(last, state_history)
+    # 1. Flatten History: Reduce Vector of Matrices -> Single Matrix (2N, Batch * Time)
+    flattened_history = reduce(hcat, state_history)
 
-    # Stack into 3D Tensor: (N, Time, Batch)
-    hidden_states_3d = stack(position_history, dims = 2)
+    # 2. Extract ONLY Positions (Bottom Half)
+    # We slice rows [N+1 : 2N, :]
+    flattened_positions = flattened_history[(layer.state_dimensions+1):end, :]
 
-    # Fold: Reshape for Output Projection: (N, Time, Batch) -> (N, Time * Batch)
-    hidden_states_flattened = reshape(hidden_states_3d, layer.state_dimensions, :)
+    # 3. Project Output: (Out, State) * (State, Batch * Time) -> (Out, Batch * Time)
+    output_flattened = output_projection * flattened_positions
 
-    # Project: (Out, N) * (N, Time * Batch) -> (Out, Time * Batch)
-    output_flattened = output_projection * hidden_states_flattened
-
-    # Unfold: Reshape back: (Out, Time * Batch) -> (Out, Time, Batch)
-    output_3d = reshape(
+    # 4. Reshape to (Out, Batch, Time) -- note the Batch-Major order from hcat
+    output_batch_major = reshape(
         output_flattened,
         layer.output_dimensions,
-        number_of_timesteps,
         number_of_batches,
+        number_of_timesteps,
     )
 
-    # If input wasn't batched, drop the dummy batch dimension to be polite
-    final_output = is_batched ? output_3d : dropdims(output_3d, dims = 3)
+    # 5. Permute to (Out, Time, Batch)
+    output_3d_tensor = permutedims(output_batch_major, (1, 3, 2))
+
+    final_output = is_batched ? output_3d_tensor : dropdims(output_3d_tensor, dims = 3)
 
     # ---------------------------------------------------------
-    # F. Prepare Next State
+    # G. Prepare Next State
     # ---------------------------------------------------------
-    # Extract the last state (N, B) from history
-    (last_velocity_batch, last_position_batch) = state_history[end]
+    last_stacked_state = state_history[end] # (2N, Batch)
 
-    # For Lux state carry-over, we take the first batch item to keep shape (2, N)
-    next_state_matrix =
-        stack((last_velocity_batch[:, 1], last_position_batch[:, 1]), dims = 1)
+    # Extract first batch item -> (2N,)
+    last_stacked_vector = last_stacked_state[:, 1]
+
+    # Reshape back to (2, N) to match Lux state format
+    # Row 1: Velocity (1:N), Row 2: Position (N+1:end)
+    # We construct it manually to avoid reshape mutation issues in Zygote
+    next_velocity_row = transpose(last_stacked_vector[1:layer.state_dimensions])
+    next_position_row = transpose(last_stacked_vector[(layer.state_dimensions+1):end])
+
+    next_state_matrix = vcat(next_velocity_row, next_position_row)
 
     return (final_output, (oscillator_state = next_state_matrix,))
 end
