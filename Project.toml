@@ -7,10 +7,12 @@ authors = ["christos chatzifountas <christos.chatzifountas@biotz.io>"]
 Lux = "b2108857-7c20-44ae-9111-449ecde12c47"
 LuxCore = "bb33d45b-7691-41d6-9220-0943567d0623"
 MLStyle = "d8e11817-5142-5d16-987a-aa16d5891078"
+NNlib = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"
 Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
 
 [compat]
 Lux = "1.26.0"
 LuxCore = "1.4.2"
 MLStyle = "0.4.17"
+NNlib = "0.9.31"
 Revise = "3.12.1"

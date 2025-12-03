@@ -1,8 +1,8 @@
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.12.1"
+julia_version = "1.12.2"
 manifest_format = "2.0"
-project_hash = "30bd20e9f16b8b65b90a6ae21753c32550f844ac"
+project_hash = "31f3755fc6da4b5e7bf412431e4532537e139cfc"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "8be2ae325471fc20b11c27bb34b518541d07dd3a"
@@ -576,7 +576,7 @@ version = "0.8.7+0"
 [[deps.OpenSSL_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "458c3c95-2e84-50aa-8efc-19380b2a3a95"
-version = "3.5.1+0"
+version = "3.5.4+0"
 
 [[deps.OpenSpecFun_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl"]
@@ -666,7 +666,7 @@ uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 version = "0.7.0"
 
 [[deps.Samba2]]
-deps = ["Lux", "LuxCore", "Revise"]
+deps = ["Lux", "LuxCore", "MLStyle", "Revise"]
 path = "."
 uuid = "21ef6326-9699-446c-bc99-5de46acc82b6"
 version = "0.1.0"

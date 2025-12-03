@@ -1,4 +1,4 @@
-module attention
+module Attention
 
 import LuxCore, Lux, NNlib, Random
 
