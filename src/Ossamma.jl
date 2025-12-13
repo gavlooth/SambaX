@@ -1,4 +1,8 @@
-module ossama
+module Ossamma
+
+"""
+Ossamma -> Oscillatory space state Attention masked morphed architecture
+"""
 
 include("Dlinoss.jl")
 include("Attention.jl")
@@ -11,13 +15,17 @@ using Random
 using NNlib
 
 
-struct GLU <: Lux.AbstractLuxLayer
+const AttentionSupertype =
+    isdefined(Lux, :AbstractExplicitLayer) ? Lux.AbstractExplicitLayer :
+    Lux.AbstractLuxLayer
+
+struct GLU <: AttentionSupertype
 
 end
 
 
 
-struct Ossama <: Lux.AbstractLuxLayer
+struct Ossamma <: Lux.AbstractLuxLayer
     input_dimensions::Int
     ossl::DLinOSS
     conv::Lux.Conv
@@ -28,7 +36,7 @@ struct Ossama <: Lux.AbstractLuxLayer
     GluProjection2::Lux.Dense
 end
 
-function Lux.initialparameters(rng::Random.AbstractRNG, layer::Ossama)
+function Lux.initialparameters(rng::Random.AbstractRNG, layer::Ossamma)
     return (
         ossl = Lux.initialparameters(rng, layer.ossl),
         conv = Lux.initialparameters(rng, layer.conv),
@@ -38,7 +46,7 @@ function Lux.initialparameters(rng::Random.AbstractRNG, layer::Ossama)
     )
 end
 
-function Lux.initialstates(rng::Random.AbstractRNG, layer::Ossama)
+function Lux.initialstates(rng::Random.AbstractRNG, layer::Ossamma)
     return (
         ossl = Lux.initialstates(rng, layer.ossl),
         conv = Lux.initialstates(rng, layer.conv),
