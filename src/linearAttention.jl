@@ -152,10 +152,21 @@ function (layer::LinearAttention)(inputs::Tuple, parameters, state)
     # 5. Extra Stability: LayerNorm the Features
     # Linear Attention is sensitive to magnitude. Normalizing features fixes this.
     # (Applying LN per token vector)
-    query_stream_cosine, feature_norm_state_one = layer.FeatureNorm(query_stream_cosine, parameters.FeatureNorm, state.FeatureNorm)
-    key_stream_cosine, feature_norm_state_two = layer.FeatureNorm(key_stream_cosine, parameters.FeatureNorm, state.FeatureNorm)
-    query_stream_sine, feature_norm_state_three = layer.FeatureNorm(query_stream_sine, parameters.FeatureNorm, state.FeatureNorm)
-    key_stream_sine, feature_norm_state_four = layer.FeatureNorm(key_stream_sine, parameters.FeatureNorm, state.FeatureNorm)
+    # Flatten to 2D for LayerNorm, then reshape back to 4D
+    flatten_for_norm(tensor) = reshape(tensor, layer.head_dimension, :)
+    unflatten_from_norm(tensor) = reshape(tensor, layer.head_dimension, layer.number_of_heads, layer.sequence_length, :)
+
+    query_stream_cosine_flat, feature_norm_state_one = layer.FeatureNorm(flatten_for_norm(query_stream_cosine), parameters.FeatureNorm, state.FeatureNorm)
+    query_stream_cosine = unflatten_from_norm(query_stream_cosine_flat)
+
+    key_stream_cosine_flat, feature_norm_state_two = layer.FeatureNorm(flatten_for_norm(key_stream_cosine), parameters.FeatureNorm, state.FeatureNorm)
+    key_stream_cosine = unflatten_from_norm(key_stream_cosine_flat)
+
+    query_stream_sine_flat, feature_norm_state_three = layer.FeatureNorm(flatten_for_norm(query_stream_sine), parameters.FeatureNorm, state.FeatureNorm)
+    query_stream_sine = unflatten_from_norm(query_stream_sine_flat)
+
+    key_stream_sine_flat, feature_norm_state_four = layer.FeatureNorm(flatten_for_norm(key_stream_sine), parameters.FeatureNorm, state.FeatureNorm)
+    key_stream_sine = unflatten_from_norm(key_stream_sine_flat)
 
     # 6. Linear Attention (Standard)
     merge_batch_dimensions(tensor) = reshape(tensor, layer.head_dimension, layer.sequence_length, :)

@@ -18,9 +18,11 @@ include("linearAttention.jl")
 include("ossm.jl")
 
 using .Attention: SWAttention
-using .LinearAttention: LinearAttention
 using .Dlinoss: DLinOSS
 using .ossm: ossm as OscSSM
+
+# Import struct with alias to avoid conflict with module name
+const LinearAttentionLayer = LinearAttention.LinearAttention
 
 using Lux
 using Random
@@ -76,8 +78,12 @@ function (layer::TimeConditionedLayerNorm)(input_tensor, time_input, params, sta
     # input_tensor: (embedding_dim, seq_len, batch) or (embedding_dim, seq_len)
     # time_input: (time_dim, batch) or (time_dim,)
 
-    # Apply base LayerNorm
-    normalized, ln_state = layer.LayerNorm(input_tensor, params.LayerNorm, state.LayerNorm)
+    # Apply base LayerNorm - flatten to 2D first, then reshape back
+    is_batched = ndims(input_tensor) == 3
+    original_size = size(input_tensor)
+    input_flattened = reshape(input_tensor, layer.embedding_dimension, :)
+    normalized_flat, ln_state = layer.LayerNorm(input_flattened, params.LayerNorm, state.LayerNorm)
+    normalized = reshape(normalized_flat, original_size)
 
     # Compute time-conditioned scale and shift
     scale_raw, scale_state = layer.ScaleProjection(time_input, params.ScaleProjection, state.ScaleProjection)
@@ -87,7 +93,6 @@ function (layer::TimeConditionedLayerNorm)(input_tensor, time_input, params, sta
     scale = 1.0f0 .+ scale_raw  # Center around 1
 
     # Broadcast scale and shift: (embedding_dim, batch) → (embedding_dim, 1, batch)
-    is_batched = ndims(input_tensor) == 3
     if is_batched
         scale_broadcast = reshape(scale, size(scale, 1), 1, size(scale, 2))
         shift_broadcast = reshape(shift, size(shift, 1), 1, size(shift, 2))
@@ -123,7 +128,7 @@ struct OssammaBlock <: LuxLayer
 
     # GLU branch: Dense → split → LinearAttn(content) ⊙ sigmoid(OscSSM(gate)) → Dense
     GluProjection::Lux.Dense           # dim → 2*dim
-    LinearAttentionLayer::LinearAttention
+    LinearAttention::LinearAttentionLayer
     OscillatorLayer::DLinOSS
     GluOutputProjection::Lux.Dense     # dim → dim
 
@@ -155,7 +160,7 @@ function OssammaBlock(
         TimeConditionedLayerNorm(embedding_dimension, time_dimension),
         # GLU branch
         Lux.Dense(embedding_dimension => 2 * embedding_dimension),
-        LinearAttention(embedding_dimension, sequence_length, number_of_heads, time_dimension),
+        LinearAttentionLayer(embedding_dimension, sequence_length, number_of_heads, time_dimension),
         DLinOSS(embedding_dimension, state_dimension, embedding_dimension, min_frequency, max_frequency, default_time_step),
         Lux.Dense(embedding_dimension => embedding_dimension),
         # Local branch
@@ -169,7 +174,7 @@ function Lux.initialparameters(rng::Random.AbstractRNG, layer::OssammaBlock)
     return (
         InputNorm = Lux.initialparameters(rng, layer.InputNorm),
         GluProjection = Lux.initialparameters(rng, layer.GluProjection),
-        LinearAttentionLayer = Lux.initialparameters(rng, layer.LinearAttentionLayer),
+        LinearAttention = Lux.initialparameters(rng, layer.LinearAttention),
         OscillatorLayer = Lux.initialparameters(rng, layer.OscillatorLayer),
         GluOutputProjection = Lux.initialparameters(rng, layer.GluOutputProjection),
         SlidingWindowAttention = Lux.initialparameters(rng, layer.SlidingWindowAttention),
@@ -181,7 +186,7 @@ function Lux.initialstates(rng::Random.AbstractRNG, layer::OssammaBlock)
     return (
         InputNorm = Lux.initialstates(rng, layer.InputNorm),
         GluProjection = Lux.initialstates(rng, layer.GluProjection),
-        LinearAttentionLayer = Lux.initialstates(rng, layer.LinearAttentionLayer),
+        LinearAttention = Lux.initialstates(rng, layer.LinearAttention),
         OscillatorLayer = Lux.initialstates(rng, layer.OscillatorLayer),
         GluOutputProjection = Lux.initialstates(rng, layer.GluOutputProjection),
         SlidingWindowAttention = Lux.initialstates(rng, layer.SlidingWindowAttention),
@@ -213,12 +218,12 @@ function (block::OssammaBlock)(inputs::Tuple, params, state)
 
     # Split into content and gate halves
     dim = block.embedding_dimension
-    content_half = glu_projected[1:dim, ..]
-    gate_half = glu_projected[(dim+1):end, ..]
+    content_half = selectdim(glu_projected, 1, 1:dim)
+    gate_half = selectdim(glu_projected, 1, (dim+1):size(glu_projected, 1))
 
     # Content → Linear Attention
-    content_output, lin_attn_state = block.LinearAttentionLayer(
-        (content_half, time_input), params.LinearAttentionLayer, state.LinearAttentionLayer
+    content_output, lin_attn_state = block.LinearAttention(
+        (content_half, time_input), params.LinearAttention, state.LinearAttention
     )
 
     # Gate → Oscillator SSM → sigmoid
@@ -280,7 +285,7 @@ function (block::OssammaBlock)(inputs::Tuple, params, state)
     new_state = (
         InputNorm = norm_state,
         GluProjection = glu_proj_state,
-        LinearAttentionLayer = lin_attn_state,
+        LinearAttention = lin_attn_state,
         OscillatorLayer = osc_state,
         GluOutputProjection = glu_out_state,
         SlidingWindowAttention = sw_attn_state,

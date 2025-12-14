@@ -32,7 +32,7 @@ function apply_oscillation(block, current_state, decay_factor, rotation_angle)
     return reshape(next_state_matrix, 2 * oscillator_count, 1)          # back to (2H, 1)
 end
 
-function Lux.initialparameters(rng, block::ossm)
+function Lux.initialparameters(rng::Random.AbstractRNG, block::ossm)
     state_dimension = ossm_state_dimension(block)
     oscillator_count = block.oscillator_count
 
@@ -52,7 +52,7 @@ function Lux.initialparameters(rng, block::ossm)
     )
 end
 
-function Lux.initialstates(rng, block::ossm)
+function Lux.initialstates(rng::Random.AbstractRNG, block::ossm)
     # Convention A: keep state as a (2H,1) column
     (; oscillation_state = zeros(Float32, ossm_state_dimension(block), 1))
 end
