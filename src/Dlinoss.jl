@@ -5,12 +5,12 @@ using Random
 using NNlib
 
 struct DLinOSS <: Lux.AbstractLuxLayer
-    input_dimensions::Int
-    state_dimensions::Int
-    output_dimensions::Int
-    min_frequency::Float32
-    max_frequency::Float32
-    dt::Float32
+    input_dimension::Int
+    state_dimension::Int
+    output_dimension::Int
+    minimum_frequency::Float32
+    maximum_frequency::Float32
+    default_time_step::Float32
 end
 
 # 1. PARAMETER INITIALIZATION
@@ -18,21 +18,21 @@ function Lux.initialparameters(rng::Random.AbstractRNG, layer::DLinOSS)
 
     log_stiffness_coefficients = collect(
         range(
-            log(layer.min_frequency),
-            log(layer.max_frequency),
-            length = layer.state_dimensions,
+            log(layer.minimum_frequency),
+            log(layer.maximum_frequency),
+            length = layer.state_dimension,
         ),
     )
 
-    log_time_step = ones(Float32, layer.state_dimensions) .* log(layer.dt)
+    log_time_step = ones(Float32, layer.state_dimension) .* log(layer.default_time_step)
 
-    log_damping_coefficients = ones(Float32, layer.state_dimensions) .* log(0.01f0)
+    log_damping_coefficients = ones(Float32, layer.state_dimension) .* log(0.01f0)
 
     input_projection =
-        randn(rng, Float32, layer.state_dimensions, layer.input_dimensions) .* 0.02f0
+        randn(rng, Float32, layer.state_dimension, layer.input_dimension) .* 0.02f0
 
     output_projection =
-        randn(rng, Float32, layer.output_dimensions, layer.state_dimensions) .* 0.02f0
+        randn(rng, Float32, layer.output_dimension, layer.state_dimension) .* 0.02f0
 
     return (
         log_time_step = log_time_step,
@@ -46,11 +46,11 @@ end
 # 2. STATE INITIALIZATION
 function Lux.initialstates(_rng::Random.AbstractRNG, layer::DLinOSS)
     # State is (2, N). Row 1 = Velocity, Row 2 = Position.
-    (oscillator_state = zeros(Float32, 2, layer.state_dimensions),)
+    (oscillator_state = zeros(Float32, 2, layer.state_dimension),)
 end
 
 # 3. FORWARD PASS
-function (layer::DLinOSS)(token_sequence::AbstractArray, params, state)
+function (layer::DLinOSS)(token_sequence::AbstractArray, parameters, state)
 
     # ---------------------------------------------------------
     # A. Handle Batch Dimensions
@@ -74,7 +74,7 @@ function (layer::DLinOSS)(token_sequence::AbstractArray, params, state)
         log_damping_coefficients,
         input_projection,
         output_projection,
-    ) = params
+    ) = parameters
 
     stiffness_coefficients = exp.(log_stiffness_coefficients)
     time_step = exp.(log_time_step)
@@ -96,13 +96,13 @@ function (layer::DLinOSS)(token_sequence::AbstractArray, params, state)
     projected_input_flattened = input_projection * input_flattened_time_batch
 
     # Unfold to (State, Time, Batch)
-    projected_input_3d_tensor = reshape(
+    projected_input_tensor = reshape(
         projected_input_flattened,
-        layer.state_dimensions,
+        layer.state_dimension,
         number_of_timesteps,
         number_of_batches,
     )
-    input_sequence_iterator = eachslice(projected_input_3d_tensor, dims = 2)
+    input_sequence_iterator = eachslice(projected_input_tensor, dims = 2)
 
     # ---------------------------------------------------------
     # E. Execution (Stacked Matrix Scan)
@@ -114,8 +114,8 @@ function (layer::DLinOSS)(token_sequence::AbstractArray, params, state)
         (current_stacked_state, current_input_matrix) -> begin
 
             # Slicing is Zygote-safe
-            previous_velocity = current_stacked_state[1:layer.state_dimensions, :]
-            previous_position = current_stacked_state[(layer.state_dimensions+1):end, :]
+            previous_velocity = current_stacked_state[1:layer.state_dimension, :]
+            previous_position = current_stacked_state[(layer.state_dimension+1):end, :]
 
             # Physics Update
             next_velocity =
@@ -152,7 +152,7 @@ function (layer::DLinOSS)(token_sequence::AbstractArray, params, state)
 
     # 2. Extract ONLY Positions (Bottom Half)
     # We slice rows [N+1 : 2N, :]
-    flattened_positions = flattened_history[(layer.state_dimensions+1):end, :]
+    flattened_positions = flattened_history[(layer.state_dimension+1):end, :]
 
     # 3. Project Output: (Out, State) * (State, Batch * Time) -> (Out, Batch * Time)
     output_flattened = output_projection * flattened_positions
@@ -160,15 +160,15 @@ function (layer::DLinOSS)(token_sequence::AbstractArray, params, state)
     # 4. Reshape to (Out, Batch, Time) -- note the Batch-Major order from hcat
     output_batch_major = reshape(
         output_flattened,
-        layer.output_dimensions,
+        layer.output_dimension,
         number_of_batches,
         number_of_timesteps,
     )
 
     # 5. Permute to (Out, Time, Batch)
-    output_3d_tensor = permutedims(output_batch_major, (1, 3, 2))
+    output_tensor = permutedims(output_batch_major, (1, 3, 2))
 
-    final_output = is_batched ? output_3d_tensor : dropdims(output_3d_tensor, dims = 3)
+    final_output = is_batched ? output_tensor : dropdims(output_tensor, dims = 3)
 
     # ---------------------------------------------------------
     # G. Prepare Next State
@@ -181,8 +181,8 @@ function (layer::DLinOSS)(token_sequence::AbstractArray, params, state)
     # Reshape back to (2, N) to match Lux state format
     # Row 1: Velocity (1:N), Row 2: Position (N+1:end)
     # We construct it manually to avoid reshape mutation issues in Zygote
-    next_velocity_row = transpose(last_stacked_vector[1:layer.state_dimensions])
-    next_position_row = transpose(last_stacked_vector[(layer.state_dimensions+1):end])
+    next_velocity_row = transpose(last_stacked_vector[1:layer.state_dimension])
+    next_position_row = transpose(last_stacked_vector[(layer.state_dimension+1):end])
 
     next_state_matrix = vcat(next_velocity_row, next_position_row)
 

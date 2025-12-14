@@ -23,30 +23,30 @@ using Statistics
 # ==============================================================================
 const SEQUENCE_LENGTH = 50
 const BATCH_SIZE = 16
-const STATE_DIM = 64
-const HIDDEN_DIM = 16
+const STATE_DIMENSION = 64
+const HIDDEN_DIMENSION = 16
 const LEARNING_RATE = 0.005
 const EPOCHS = 200 # Reduced slightly for quick testing
 
-const INPUT_DIM = 1
-const OUTPUT_DIM = 1
+const INPUT_DIMENSION = 1
+const OUTPUT_DIMENSION = 1
 
 # ==============================================================================
 # 2. DATA GENERATION
 # ==============================================================================
-function generate_sine_data(rng, batch_size, seq_len)
-    t = range(0, 4π, length = seq_len)
-    data = zeros(Float32, 1, seq_len, batch_size)
-    targets = zeros(Float32, 1, seq_len, batch_size)
+function generate_sine_data(rng, batch_size, sequence_length)
+    time_values = range(0, 4π, length = sequence_length)
+    data = zeros(Float32, 1, sequence_length, batch_size)
+    targets = zeros(Float32, 1, sequence_length, batch_size)
 
-    for b = 1:batch_size
-        freq = 1.0f0 + rand(rng, Float32)
+    for batch_index = 1:batch_size
+        frequency = 1.0f0 + rand(rng, Float32)
         phase = rand(rng, Float32) * 2π
-        signal = sin.(freq .* t .+ phase)
+        signal = sin.(frequency .* time_values .+ phase)
 
-        data[1, :, b] = signal
-        targets[1, 1:end-1, b] = signal[2:end]
-        targets[1, end, b] = signal[1]
+        data[1, :, batch_index] = signal
+        targets[1, 1:end-1, batch_index] = signal[2:end]
+        targets[1, end, batch_index] = signal[1]
     end
     return Float32.(data), Float32.(targets)
 end
@@ -56,10 +56,10 @@ end
 # ==============================================================================
 function build_model()
     return Chain(
-        Dense(INPUT_DIM => HIDDEN_DIM),
-        Dlinoss.DLinOSS(HIDDEN_DIM, STATE_DIM, HIDDEN_DIM, 0.1f0, 5.0f0, 0.05f0),
+        Dense(INPUT_DIMENSION => HIDDEN_DIMENSION),
+        Dlinoss.DLinOSS(HIDDEN_DIMENSION, STATE_DIMENSION, HIDDEN_DIMENSION, 0.1f0, 5.0f0, 0.05f0),
         Lux.gelu,
-        Dense(HIDDEN_DIM => OUTPUT_DIM),
+        Dense(HIDDEN_DIMENSION => OUTPUT_DIMENSION),
     )
 end
 
@@ -71,23 +71,23 @@ function train()
     Random.seed!(rng, 42)
 
     model = build_model()
-    ps, st = Lux.setup(rng, model)
+    parameters, state = Lux.setup(rng, model)
 
-    opt = Optimisers.Adam(LEARNING_RATE)
-    opt_state = Optimisers.setup(opt, ps)
+    optimizer = Optimisers.Adam(LEARNING_RATE)
+    optimizer_state = Optimisers.setup(optimizer, parameters)
 
     println(">>> Model built. Layers: $(length(model))")
     println(">>> Starting Training...")
 
     for epoch = 1:EPOCHS
-        x_batch, y_true = generate_sine_data(rng, BATCH_SIZE, SEQUENCE_LENGTH)
+        input_batch, target_output = generate_sine_data(rng, BATCH_SIZE, SEQUENCE_LENGTH)
 
-        loss, grads = Zygote.withgradient(ps) do params
-            y_pred, _ = Lux.apply(model, x_batch, params, st)
-            mean(abs2, y_pred .- y_true)
+        loss, gradients = Zygote.withgradient(parameters) do params
+            predicted_output, _ = Lux.apply(model, input_batch, params, state)
+            mean(abs2, predicted_output .- target_output)
         end
 
-        opt_state, ps = Optimisers.update(opt_state, ps, grads[1])
+        optimizer_state, parameters = Optimisers.update(optimizer_state, parameters, gradients[1])
 
         if epoch % 20 == 0 || epoch == 1
             println("    Epoch $epoch | Loss: $(round(loss, digits=6))")
@@ -99,4 +99,4 @@ end
 
 train()
 
-end 
+end

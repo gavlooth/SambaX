@@ -1,0 +1,28 @@
+# LLaDA Model Configuration - Large
+
+[model]
+vocab_size = 32000
+max_sequence_length = 1024
+embedding_dimension = 1024
+number_of_heads = 16
+number_of_layers = 24
+mask_token_id = -1
+
+[model.dimensions]
+time_dimension = 256
+state_dimension = 1024
+
+[model.attention]
+window_size = 128
+
+[model.oscillator]
+min_frequency = 0.05
+max_frequency = 20.0
+default_time_step = 0.05
+
+[generation]
+default_num_steps = 25
+default_temperature = 0.9
+
+[training]
+mask_schedule = "cosine"
