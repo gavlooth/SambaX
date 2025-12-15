@@ -4,16 +4,25 @@ version = "0.1.0"
 authors = ["christos chatzifountas <christos.chatzifountas@biotz.io>"]
 
 [deps]
+Downloads = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
+JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
 Lux = "b2108857-7c20-44ae-9111-449ecde12c47"
 LuxCore = "bb33d45b-7691-41d6-9220-0943567d0623"
 MLStyle = "d8e11817-5142-5d16-987a-aa16d5891078"
 NNlib = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"
+Optimisers = "3bd65402-5787-11e9-1adc-39752487f4e2"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
+Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
+JSON3 = "1"
 Lux = "1"
 LuxCore = "1"
 MLStyle = "0.4.17"
 NNlib = "0.9.31"
+Optimisers = "0.4"
 Revise = "3.12.1"
+Zygote = "0.6"
