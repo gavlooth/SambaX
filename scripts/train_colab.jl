@@ -21,12 +21,8 @@ os.environ['PATH'] = '/usr/local/julia/bin:' + os.environ['PATH']
 using Pkg
 
 # Handle both script and REPL execution
-const PROJECT_ROOT = if @__DIR__ == ""
-    # Running from REPL/notebook - assume we're in Ossamma directory or use env var
-    get(ENV, "OSSAMMA_ROOT", "/content/Ossamma")
-else
-    dirname(@__DIR__)
-end
+const SCRIPT_DIR = @__DIR__
+const PROJECT_ROOT = isempty(SCRIPT_DIR) ? get(ENV, "OSSAMMA_ROOT", "/content/Ossamma") : dirname(SCRIPT_DIR)
 
 Pkg.activate(PROJECT_ROOT)
 Pkg.instantiate()
