@@ -19,7 +19,16 @@ os.environ['PATH'] = '/usr/local/julia/bin:' + os.environ['PATH']
 """
 
 using Pkg
-Pkg.activate(@__DIR__ * "/..")
+
+# Handle both script and REPL execution
+const PROJECT_ROOT = if @__DIR__ == ""
+    # Running from REPL/notebook - assume we're in Ossamma directory or use env var
+    get(ENV, "OSSAMMA_ROOT", "/content/Ossamma")
+else
+    dirname(@__DIR__)
+end
+
+Pkg.activate(PROJECT_ROOT)
 Pkg.instantiate()
 
 # ============================================================================
@@ -61,9 +70,9 @@ println("=" ^ 60)
 println()
 
 # Load modules
-include(joinpath(@__DIR__, "..", "src", "DataLoader.jl"))
-include(joinpath(@__DIR__, "..", "src", "LLaDA.jl"))
-include(joinpath(@__DIR__, "..", "src", "Training.jl"))
+include(joinpath(PROJECT_ROOT, "src", "DataLoader.jl"))
+include(joinpath(PROJECT_ROOT, "src", "LLaDA.jl"))
+include(joinpath(PROJECT_ROOT, "src", "Training.jl"))
 
 using .DataLoader
 using .LLaDA
