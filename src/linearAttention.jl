@@ -8,7 +8,7 @@ const LuxAttentionSupertype = isdefined(Lux, :AbstractExplicitLayer) ?
                               Lux.AbstractExplicitLayer :
                               Lux.AbstractLuxLayer
 
-struct LinearAttention{Q,K,V,O,QC,KC,TP,PC,PS,LN} <: LuxAttentionSupertype
+struct LinearAttentionLayer{Q,K,V,O,QC,KC,TP,PC,PS,LN} <: LuxAttentionSupertype
     sequence_length::Int
     embedding_dimension::Int
     number_of_heads::Int
@@ -35,7 +35,7 @@ struct LinearAttention{Q,K,V,O,QC,KC,TP,PC,PS,LN} <: LuxAttentionSupertype
     FeatureNorm::LN
 end
 
-function LinearAttention(embedding_dimension::Int, sequence_length::Int, number_of_heads::Int, time_dimension::Int)
+function LinearAttentionLayer(embedding_dimension::Int, sequence_length::Int, number_of_heads::Int, time_dimension::Int)
     head_dimension = div(embedding_dimension, number_of_heads)
 
     # 1. Linear Only for the feature map (we activate later)
@@ -45,7 +45,7 @@ function LinearAttention(embedding_dimension::Int, sequence_length::Int, number_
         Dense(head_dimension * 2 => head_dimension), # No activation here!
     )
 
-    return LinearAttention(
+    return LinearAttentionLayer(
         sequence_length,
         embedding_dimension,
         number_of_heads,
@@ -66,7 +66,7 @@ function LinearAttention(embedding_dimension::Int, sequence_length::Int, number_
 end
 
 # PARAMETER INITIALIZATION
-function Lux.initialparameters(rng::Random.AbstractRNG, layer::LinearAttention)
+function Lux.initialparameters(rng::Random.AbstractRNG, layer::LinearAttentionLayer)
     return (
         QueryProjection = Lux.initialparameters(rng, layer.QueryProjection),
         KeyProjection = Lux.initialparameters(rng, layer.KeyProjection),
@@ -82,7 +82,7 @@ function Lux.initialparameters(rng::Random.AbstractRNG, layer::LinearAttention)
 end
 
 # STATE INITIALIZATION
-function Lux.initialstates(rng::Random.AbstractRNG, layer::LinearAttention)
+function Lux.initialstates(rng::Random.AbstractRNG, layer::LinearAttentionLayer)
     return (
         QueryProjection = Lux.initialstates(rng, layer.QueryProjection),
         KeyProjection = Lux.initialstates(rng, layer.KeyProjection),
@@ -97,7 +97,7 @@ function Lux.initialstates(rng::Random.AbstractRNG, layer::LinearAttention)
     )
 end
 
-function (layer::LinearAttention)(inputs::Tuple, parameters, state)
+function (layer::LinearAttentionLayer)(inputs::Tuple, parameters, state)
     input_tensor, time_input = inputs
 
     # 1. Projections

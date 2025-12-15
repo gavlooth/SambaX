@@ -19,10 +19,10 @@ include("ossm.jl")
 
 using .Attention: SWAttention
 using .Dlinoss: DLinOSS
-using .ossm: ossm as OscSSM
+using .ossm: OSSMLayer as OscSSM
 
-# Import struct with alias to avoid conflict with module name
-const LinearAttentionLayer = LinearAttention.LinearAttention
+# Import struct from LinearAttention module
+using .LinearAttention: LinearAttentionLayer
 
 using Lux
 using Random

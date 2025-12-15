@@ -2,13 +2,13 @@ module ossm
 
 import LuxCore, Lux, Random, NNlib
 
-struct ossm <: Lux.AbstractLuxLayer
+struct OSSMLayer <: Lux.AbstractLuxLayer
     input_dimension::Int
     output_dimension::Int
     oscillator_count::Int
 end
 
-@inline function ossm_state_dimension(block::ossm)
+@inline function ossm_state_dimension(block::OSSMLayer)
     # state_dimension = 2 * oscillator_count (two coordinates per oscillator)
     2 * block.oscillator_count
 end
@@ -32,7 +32,7 @@ function apply_oscillation(block, current_state, decay_factor, rotation_angle)
     return reshape(next_state_matrix, 2 * oscillator_count, 1)          # back to (2H, 1)
 end
 
-function Lux.initialparameters(rng::Random.AbstractRNG, block::ossm)
+function Lux.initialparameters(rng::Random.AbstractRNG, block::OSSMLayer)
     state_dimension = ossm_state_dimension(block)
     oscillator_count = block.oscillator_count
 
@@ -52,7 +52,7 @@ function Lux.initialparameters(rng::Random.AbstractRNG, block::ossm)
     )
 end
 
-function Lux.initialstates(rng::Random.AbstractRNG, block::ossm)
+function Lux.initialstates(rng::Random.AbstractRNG, block::OSSMLayer)
     # Convention A: keep state as a (2H,1) column
     (; oscillation_state = zeros(Float32, ossm_state_dimension(block), 1))
 end
@@ -84,7 +84,7 @@ function oscillator_step(block, parameters, current_state, input_token)
     return (output, (; oscillation_state = next_state))
 end
 
-function (block::ossm)(input_sequence, parameters, state)
+function (block::OSSMLayer)(input_sequence, parameters, state)
     # input_sequence :: (input_dimension, T), columns are tokens
     initial_state = state.oscillation_state
     @assert size(initial_state) == (ossm_state_dimension(block), 1)
