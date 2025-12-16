@@ -19,10 +19,15 @@ echo "Bun version: $(bun --version)"
 echo "Installing Claude Code CLI..."
 bun install -g @anthropic-ai/claude-code
 
+# Allow running as root (container environment)
+cat >> ~/.bashrc << 'EOF'
+alias claude='claude --dangerously-skip-permissions'
+EOF
+
 echo ""
 echo "========================================"
 echo "Installation complete!"
 echo "========================================"
 echo ""
 echo "Run 'source ~/.bashrc' or start a new shell"
-echo "Then run 'claude' to start"
+echo "Then run 'claude' to start (root check bypassed)"
