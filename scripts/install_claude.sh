@@ -2,22 +2,23 @@
 set -e
 
 echo "========================================"
-echo "Installing Bun + Claude Code CLI"
+echo "Installing Node + Claude Code CLI"
 echo "========================================"
 
-# Install bun
-if ! command -v bun &> /dev/null; then
-    echo "Installing bun..."
-    curl -fsSL https://bun.sh/install | bash
-    export BUN_INSTALL="$HOME/.bun"
-    export PATH="$BUN_INSTALL/bin:$PATH"
+# Install Node.js via nvm
+if ! command -v node &> /dev/null; then
+    echo "Installing Node.js..."
+    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+    export NVM_DIR="$HOME/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+    nvm install --lts
 fi
 
-echo "Bun version: $(bun --version)"
+echo "Node version: $(node --version)"
 
 # Install Claude Code CLI globally
 echo "Installing Claude Code CLI..."
-bun install -g @anthropic-ai/claude-code
+npm install -g @anthropic-ai/claude-code
 
 # Allow running as root (container environment)
 cat >> ~/.bashrc << 'EOF'
