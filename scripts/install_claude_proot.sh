@@ -22,22 +22,14 @@ fi
 # Install claude code
 bun install -g @anthropic-ai/claude-code
 
-# Create wrapper that uses proot to fake uid 1000
+# Create wrapper that uses proot to fake uid 1000 (non-root)
 cat > /usr/local/bin/claude << 'WRAPPER'
 #!/bin/bash
 export PATH="$HOME/.bun/bin:$PATH"
-exec proot -0 -w "$(pwd)" -b /dev -b /proc -b /sys $(which claude.bun 2>/dev/null || echo "$HOME/.bun/bin/claude") "$@"
+CLAUDE_BIN="$HOME/.bun/bin/claude"
+exec proot -i 1000:1000 -w "$(pwd)" "$CLAUDE_BIN" "$@"
 WRAPPER
 chmod +x /usr/local/bin/claude
-
-# Alternative: direct proot wrapper
-cat > /usr/local/bin/claude-proot << 'WRAPPER'
-#!/bin/bash
-export PATH="$HOME/.bun/bin:$PATH"
-CLAUDE_BIN=$(find ~/.bun -name "claude" -type f 2>/dev/null | head -1)
-exec proot --rootid "$CLAUDE_BIN" "$@"
-WRAPPER
-chmod +x /usr/local/bin/claude-proot
 
 echo ""
 echo "========================================"
@@ -45,4 +37,3 @@ echo "Installation complete!"
 echo "========================================"
 echo ""
 echo "Run 'source ~/.bashrc && claude' to start"
-echo "Or try 'claude-proot' if that doesn't work"
