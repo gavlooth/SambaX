@@ -17,6 +17,7 @@ using Optimisers
 using Zygote
 using Statistics: mean
 using TOML
+using Serialization
 
 using ..LLaDA: LLaDAModel, LLaDAConfig, apply_mask, sample_mask_ratio
 
@@ -457,6 +458,78 @@ function train!(
 end
 
 # ============================================================================
+# Checkpoint Utilities
+# ============================================================================
+
+"""
+    load_checkpoint(path::String) -> NamedTuple
+
+Load a checkpoint from a .jls file.
+
+Returns a NamedTuple with fields:
+- `params`: Model parameters (NamedTuple)
+- `state`: Model state (NamedTuple)
+- `opt_state`: Optimizer state (or nothing)
+- `epoch`: Epoch number (or step if epoch not present)
+- `loss`: Loss value (or nothing)
+
+# Example
+```julia
+checkpoint = load_checkpoint("checkpoints/checkpoint_best.jls")
+ps = checkpoint.params
+st = checkpoint.state
+```
+"""
+function load_checkpoint(path::String)
+    data = deserialize(path)
+    return (
+        params = get(data, :params, nothing),
+        state = get(data, :state, nothing),
+        opt_state = get(data, :opt_state, nothing),
+        epoch = get(data, :epoch, get(data, :step, 0)),
+        loss = get(data, :loss, nothing),
+    )
+end
+
+"""
+    save_checkpoint(path::String; params, state, opt_state=nothing, epoch=0, loss=nothing)
+
+Save a checkpoint to a .jls file.
+
+# Arguments
+- `path`: Output file path (.jls extension recommended)
+- `params`: Model parameters (required)
+- `state`: Model state (required)
+- `opt_state`: Optimizer state (optional)
+- `epoch`: Epoch number (default: 0)
+- `loss`: Loss value (optional)
+
+# Example
+```julia
+save_checkpoint("checkpoints/checkpoint_epoch_10.jls";
+    params=ps, state=st, opt_state=opt_state, epoch=10, loss=0.5f0)
+```
+"""
+function save_checkpoint(
+    path::String;
+    params,
+    state,
+    opt_state = nothing,
+    epoch::Int = 0,
+    loss = nothing,
+)
+    data = Dict{Symbol,Any}(
+        :params => params,
+        :state => state,
+        :opt_state => opt_state,
+        :epoch => epoch,
+        :loss => loss,
+    )
+    serialize(path, data)
+    return path
+end
+
+# ============================================================================
 # Exports
 # ============================================================================
 
@@ -465,5 +538,6 @@ export TrainState, create_train_state, train_step!
 export warmup_cosine_schedule, create_scheduled_optimizer
 export evaluate, compute_accuracy
 export TrainingConfig, load_training_config, training_config_from_dict, train!
+export load_checkpoint, save_checkpoint
 
 end # module

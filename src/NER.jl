@@ -112,13 +112,14 @@ end
 # OssammaNER Model
 # =============================================================================
 
-struct OssammaNER{E, P, T, B, H} <: LuxLayer
+struct OssammaNER{E, P, T, B, D, H} <: LuxLayer
     vocab_size::Int
     max_sequence_length::Int
     embedding_dimension::Int
     number_of_heads::Int
     number_of_layers::Int
     num_labels::Int
+    dropout_rate::Float32
 
     # Embeddings
     TokenEmbedding::E
@@ -127,6 +128,9 @@ struct OssammaNER{E, P, T, B, H} <: LuxLayer
 
     # Encoder blocks
     Blocks::B
+
+    # Dropout before classification
+    Dropout::D
 
     # Token classification head (per-token output)
     ClassificationHead::H
@@ -153,6 +157,7 @@ function OssammaNER(config::NERConfig)
         min_frequency = config.min_frequency,
         max_frequency = config.max_frequency,
         default_time_step = config.default_time_step,
+        dropout_rate = config.dropout_rate,
     )
 end
 
@@ -169,6 +174,7 @@ function OssammaNER(;
     min_frequency::Float32 = 0.1f0,
     max_frequency::Float32 = 10.0f0,
     default_time_step::Float32 = 0.1f0,
+    dropout_rate::Float32 = 0.1f0,
 )
     # Build stack of OssammaBlocks
     blocks = Tuple([
@@ -193,15 +199,19 @@ function OssammaNER(;
         number_of_heads,
         number_of_layers,
         num_labels,
+        dropout_rate,
         # Embeddings
         Lux.Embedding(vocab_size => embedding_dimension),
         Lux.Embedding(max_sequence_length => embedding_dimension),
         FixedTimeEmbedding(time_dimension),
         # Encoder blocks
         blocks,
-        # Per-token classification: LayerNorm → Dense → Labels
+        # Dropout before classification
+        Lux.Dropout(dropout_rate),
+        # Per-token classification: LayerNorm → Dropout → Dense → Labels
         Lux.Chain(
             Lux.LayerNorm((embedding_dimension,)),
+            Lux.Dropout(dropout_rate),
             Lux.Dense(embedding_dimension => num_labels),
         ),
     )
@@ -217,6 +227,7 @@ function Lux.initialparameters(rng::Random.AbstractRNG, model::OssammaNER)
         PositionEmbedding = Lux.initialparameters(rng, model.PositionEmbedding),
         TimeEmbedding = Lux.initialparameters(rng, model.TimeEmbedding),
         Blocks = block_params,
+        Dropout = Lux.initialparameters(rng, model.Dropout),
         ClassificationHead = Lux.initialparameters(rng, model.ClassificationHead),
     )
 end
@@ -226,12 +237,17 @@ function Lux.initialstates(rng::Random.AbstractRNG, model::OssammaNER)
         Tuple(Lux.initialstates(rng, block) for block in model.Blocks)
     )
 
+    # Cache position indices to avoid allocation in forward pass
+    position_indices = collect(1:model.max_sequence_length)
+
     return (
         TokenEmbedding = Lux.initialstates(rng, model.TokenEmbedding),
         PositionEmbedding = Lux.initialstates(rng, model.PositionEmbedding),
         TimeEmbedding = Lux.initialstates(rng, model.TimeEmbedding),
         Blocks = block_states,
+        Dropout = Lux.initialstates(rng, model.Dropout),
         ClassificationHead = Lux.initialstates(rng, model.ClassificationHead),
+        position_indices = position_indices,
     )
 end
 
@@ -255,9 +271,9 @@ function (model::OssammaNER)(token_ids::AbstractArray, params, state)
     token_emb = reshape(token_emb_flat, model.embedding_dimension, seq_len, batch_size)
 
     # =========================================================================
-    # 2. Position Embedding
+    # 2. Position Embedding (using cached indices)
     # =========================================================================
-    position_indices = collect(1:seq_len)
+    position_indices = @view state.position_indices[1:seq_len]
     pos_emb_raw, pos_state = model.PositionEmbedding(position_indices, params.PositionEmbedding, state.PositionEmbedding)
     pos_emb = reshape(pos_emb_raw, model.embedding_dimension, seq_len, 1)
 
@@ -287,11 +303,16 @@ function (model::OssammaNER)(token_ids::AbstractArray, params, state)
     end
 
     # =========================================================================
-    # 6. Per-token Classification
+    # 6. Apply dropout before classification
     # =========================================================================
     # hidden: (embedding_dim, seq_len, batch)
-    # Flatten for Dense, then reshape back
+    # Flatten for dropout
     hidden_flat = reshape(hidden, model.embedding_dimension, :)
+    hidden_flat, dropout_state = model.Dropout(hidden_flat, params.Dropout, state.Dropout)
+
+    # =========================================================================
+    # 7. Per-token Classification
+    # =========================================================================
     logits_flat, head_state = model.ClassificationHead(hidden_flat, params.ClassificationHead, state.ClassificationHead)
     # logits_flat: (num_labels, seq_len * batch)
 
@@ -301,7 +322,7 @@ function (model::OssammaNER)(token_ids::AbstractArray, params, state)
     final_logits = is_batched ? logits : dropdims(logits, dims=3)
 
     # =========================================================================
-    # 7. Update State
+    # 8. Update State
     # =========================================================================
     new_block_states = NamedTuple{ntuple(i -> Symbol("Block_$i"), model.number_of_layers)}(
         block_states
@@ -312,7 +333,9 @@ function (model::OssammaNER)(token_ids::AbstractArray, params, state)
         PositionEmbedding = pos_state,
         TimeEmbedding = time_state,
         Blocks = new_block_states,
+        Dropout = dropout_state,
         ClassificationHead = head_state,
+        position_indices = state.position_indices,
     )
 
     return final_logits, new_state

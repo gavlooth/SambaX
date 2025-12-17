@@ -296,6 +296,279 @@ function (block::OssammaBlock)(inputs::Tuple, params, state)
 end
 
 # ============================================================================
+# SimpleOssammaBlock (without time conditioning, with FFN)
+# ============================================================================
+
+"""
+SimpleOssammaBlock - Ossamma block without time conditioning.
+
+Key differences from OssammaBlock:
+- Uses standard LayerNorm instead of TimeConditionedLayerNorm
+- Alpha mixing is learnable but not time-conditioned
+- Includes FFN (Feed-Forward Network) after attention mixing
+- Includes Dropout for regularization
+
+Architecture:
+- Input → LayerNorm
+- Two parallel branches:
+  1. Global-Spectral GLU: Dense(dim→2*dim) → split → LinearAttn(content) ⊙ sigmoid(OscSSM(gate)) → Dense
+  2. Local-Sharp: Windowed Softmax Attention (SWAttention)
+- Mix: α·GLU + (1-α)·Local where α = σ(f(x))
+- Dropout + Residual
+- FFN: LayerNorm → Dense → GELU → Dense
+- Dropout + Residual
+"""
+struct SimpleOssammaBlock <: LuxLayer
+    embedding_dimension::Int
+    sequence_length::Int
+    number_of_heads::Int
+    state_dimension::Int
+    ffn_multiplier::Int
+    dropout_rate::Float32
+
+    # Standard LayerNorm (NOT time-conditioned)
+    InputNorm::Lux.LayerNorm
+
+    # GLU branch
+    GluProjection::Lux.Dense           # dim → 2*dim
+    LinearAttention::LinearAttentionLayer
+    OscillatorLayer::DLinOSS
+    GluOutputProjection::Lux.Dense     # dim → dim
+
+    # Local branch
+    SlidingWindowAttention::SWAttention
+
+    # Mixing: fixed learnable alpha (not time-conditioned)
+    AlphaProjection::Lux.Dense         # dim → 1
+
+    # Attention dropout
+    AttentionDropout::Lux.Dropout
+
+    # FFN block
+    FFNNorm::Lux.LayerNorm
+    FFN1::Lux.Dense                    # dim → ffn_mult*dim with GELU
+    FFN2::Lux.Dense                    # ffn_mult*dim → dim
+    FFNDropout::Lux.Dropout
+
+    # Fixed time embedding for LinearAttention compatibility
+    _dummy_time_dim::Int
+end
+
+function SimpleOssammaBlock(
+    embedding_dimension::Int,
+    sequence_length::Int,
+    number_of_heads::Int;
+    state_dimension::Int = embedding_dimension,
+    window_size::Int = 5,
+    min_frequency::Float32 = 0.1f0,
+    max_frequency::Float32 = 10.0f0,
+    default_time_step::Float32 = 0.1f0,
+    ffn_multiplier::Int = 4,
+    dropout_rate::Float32 = 0.1f0,
+    time_dimension::Int = 64,  # For LinearAttention compatibility
+)
+    ffn_dim = embedding_dimension * ffn_multiplier
+
+    return SimpleOssammaBlock(
+        embedding_dimension,
+        sequence_length,
+        number_of_heads,
+        state_dimension,
+        ffn_multiplier,
+        dropout_rate,
+        # Standard LayerNorm
+        Lux.LayerNorm((embedding_dimension,)),
+        # GLU branch
+        Lux.Dense(embedding_dimension => 2 * embedding_dimension),
+        LinearAttentionLayer(embedding_dimension, sequence_length, number_of_heads, time_dimension),
+        DLinOSS(embedding_dimension, state_dimension, embedding_dimension, min_frequency, max_frequency, default_time_step),
+        Lux.Dense(embedding_dimension => embedding_dimension),
+        # Local branch
+        SWAttention(sequence_length, embedding_dimension, number_of_heads; window_size = window_size),
+        # Alpha mixing
+        Lux.Dense(embedding_dimension => 1),
+        # Attention dropout
+        Lux.Dropout(dropout_rate),
+        # FFN
+        Lux.LayerNorm((embedding_dimension,)),
+        Lux.Dense(embedding_dimension => ffn_dim, NNlib.gelu),
+        Lux.Dense(ffn_dim => embedding_dimension),
+        Lux.Dropout(dropout_rate),
+        # For LinearAttention dummy time
+        time_dimension,
+    )
+end
+
+function Lux.initialparameters(rng::Random.AbstractRNG, block::SimpleOssammaBlock)
+    return (
+        InputNorm = Lux.initialparameters(rng, block.InputNorm),
+        GluProjection = Lux.initialparameters(rng, block.GluProjection),
+        LinearAttention = Lux.initialparameters(rng, block.LinearAttention),
+        OscillatorLayer = Lux.initialparameters(rng, block.OscillatorLayer),
+        GluOutputProjection = Lux.initialparameters(rng, block.GluOutputProjection),
+        SlidingWindowAttention = Lux.initialparameters(rng, block.SlidingWindowAttention),
+        AlphaProjection = Lux.initialparameters(rng, block.AlphaProjection),
+        AttentionDropout = Lux.initialparameters(rng, block.AttentionDropout),
+        FFNNorm = Lux.initialparameters(rng, block.FFNNorm),
+        FFN1 = Lux.initialparameters(rng, block.FFN1),
+        FFN2 = Lux.initialparameters(rng, block.FFN2),
+        FFNDropout = Lux.initialparameters(rng, block.FFNDropout),
+    )
+end
+
+function Lux.initialstates(rng::Random.AbstractRNG, block::SimpleOssammaBlock)
+    return (
+        InputNorm = Lux.initialstates(rng, block.InputNorm),
+        GluProjection = Lux.initialstates(rng, block.GluProjection),
+        LinearAttention = Lux.initialstates(rng, block.LinearAttention),
+        OscillatorLayer = Lux.initialstates(rng, block.OscillatorLayer),
+        GluOutputProjection = Lux.initialstates(rng, block.GluOutputProjection),
+        SlidingWindowAttention = Lux.initialstates(rng, block.SlidingWindowAttention),
+        AlphaProjection = Lux.initialstates(rng, block.AlphaProjection),
+        AttentionDropout = Lux.initialstates(rng, block.AttentionDropout),
+        FFNNorm = Lux.initialstates(rng, block.FFNNorm),
+        FFN1 = Lux.initialstates(rng, block.FFN1),
+        FFN2 = Lux.initialstates(rng, block.FFN2),
+        FFNDropout = Lux.initialstates(rng, block.FFNDropout),
+        # Cache dummy time embedding (zeros)
+        dummy_time_emb = nothing,
+    )
+end
+
+function (block::SimpleOssammaBlock)(input_tensor::AbstractArray, params, state)
+    # input_tensor: (embedding_dim, seq_len, batch) or (embedding_dim, seq_len)
+
+    residual = input_tensor
+    is_batched = ndims(input_tensor) == 3
+    batch_size = is_batched ? size(input_tensor, 3) : 1
+
+    # =========================================================================
+    # 1. Standard LayerNorm
+    # =========================================================================
+    input_flat = reshape(input_tensor, block.embedding_dimension, :)
+    normalized_flat, input_norm_state = block.InputNorm(input_flat, params.InputNorm, state.InputNorm)
+    normalized = reshape(normalized_flat, size(input_tensor))
+
+    # =========================================================================
+    # 2. Global-Spectral GLU Branch
+    # =========================================================================
+    # Project to 2*dim and split
+    glu_projected, glu_proj_state = block.GluProjection(
+        normalized, params.GluProjection, state.GluProjection
+    )
+
+    # Split into content and gate halves
+    dim = block.embedding_dimension
+    content_half = selectdim(glu_projected, 1, 1:dim)
+    gate_half = selectdim(glu_projected, 1, (dim+1):size(glu_projected, 1))
+
+    # Create dummy time embedding (zeros) for LinearAttention compatibility
+    time_emb = zeros(Float32, block._dummy_time_dim, batch_size)
+
+    # Content → Linear Attention (with dummy time)
+    content_output, lin_attn_state = block.LinearAttention(
+        (content_half, time_emb), params.LinearAttention, state.LinearAttention
+    )
+
+    # Gate → Oscillator SSM → sigmoid
+    gate_output, osc_state = block.OscillatorLayer(
+        gate_half, params.OscillatorLayer, state.OscillatorLayer
+    )
+    gate_activated = NNlib.sigmoid.(gate_output)
+
+    # GLU: content ⊙ gate
+    glu_combined = content_output .* gate_activated
+
+    # Output projection
+    glu_output, glu_out_state = block.GluOutputProjection(
+        glu_combined, params.GluOutputProjection, state.GluOutputProjection
+    )
+
+    # =========================================================================
+    # 3. Local-Sharp Branch (Windowed Softmax Attention)
+    # =========================================================================
+    local_output, sw_attn_state = block.SlidingWindowAttention(
+        normalized, params.SlidingWindowAttention, state.SlidingWindowAttention
+    )
+
+    # =========================================================================
+    # 4. Adaptive Mixing: α·GLU + (1-α)·Local
+    # =========================================================================
+    seq_dim = 2
+
+    # Mean pool over sequence dimension
+    input_pooled = dropdims(mean(normalized, dims = seq_dim), dims = seq_dim)
+
+    alpha_logits, alpha_state = block.AlphaProjection(
+        input_pooled, params.AlphaProjection, state.AlphaProjection
+    )
+
+    # Apply sigmoid (no time-conditioned bias)
+    alpha = NNlib.sigmoid.(alpha_logits)
+
+    # Broadcast alpha for mixing
+    if is_batched
+        alpha_broadcast = reshape(alpha, 1, 1, size(alpha, 2))
+    else
+        alpha_broadcast = reshape(alpha, 1, 1)
+    end
+
+    # Mix outputs
+    mixed_output = alpha_broadcast .* glu_output .+ (1.0f0 .- alpha_broadcast) .* local_output
+
+    # =========================================================================
+    # 5. Attention Dropout + First Residual
+    # =========================================================================
+    mixed_output, attn_dropout_state = block.AttentionDropout(
+        mixed_output, params.AttentionDropout, state.AttentionDropout
+    )
+    after_attn = residual .+ mixed_output
+
+    # =========================================================================
+    # 6. FFN Block
+    # =========================================================================
+    ffn_residual = after_attn
+
+    # FFN LayerNorm
+    ffn_input_flat = reshape(after_attn, block.embedding_dimension, :)
+    ffn_norm_flat, ffn_norm_state = block.FFNNorm(ffn_input_flat, params.FFNNorm, state.FFNNorm)
+    ffn_normed = reshape(ffn_norm_flat, size(after_attn))
+
+    # FFN: Dense → GELU → Dense
+    ffn_hidden, ffn1_state = block.FFN1(ffn_normed, params.FFN1, state.FFN1)
+    ffn_out, ffn2_state = block.FFN2(ffn_hidden, params.FFN2, state.FFN2)
+
+    # FFN Dropout
+    ffn_out, ffn_dropout_state = block.FFNDropout(ffn_out, params.FFNDropout, state.FFNDropout)
+
+    # =========================================================================
+    # 7. Second Residual → Output
+    # =========================================================================
+    output = ffn_residual .+ ffn_out
+
+    # =========================================================================
+    # 8. Update State
+    # =========================================================================
+    new_state = (
+        InputNorm = input_norm_state,
+        GluProjection = glu_proj_state,
+        LinearAttention = lin_attn_state,
+        OscillatorLayer = osc_state,
+        GluOutputProjection = glu_out_state,
+        SlidingWindowAttention = sw_attn_state,
+        AlphaProjection = alpha_state,
+        AttentionDropout = attn_dropout_state,
+        FFNNorm = ffn_norm_state,
+        FFN1 = ffn1_state,
+        FFN2 = ffn2_state,
+        FFNDropout = ffn_dropout_state,
+        dummy_time_emb = nothing,
+    )
+
+    return output, new_state
+end
+
+# ============================================================================
 # LLaDA Text Diffusion Model
 # ============================================================================
 include("LLaDA.jl")
@@ -312,6 +585,7 @@ using .Training: masked_cross_entropy, diffusion_loss
 using .Training: TrainState, create_train_state, train_step!
 using .Training: warmup_cosine_schedule, evaluate, compute_accuracy
 using .Training: TrainingConfig, load_training_config, train!
+using .Training: load_checkpoint, save_checkpoint
 
 # ============================================================================
 # Classification Model
@@ -320,6 +594,9 @@ include("Classification.jl")
 using .Classification: OssammaClassifier, ClassifierConfig
 using .Classification: SequencePooling, FixedTimeEmbedding
 using .Classification: tiny_classifier, small_classifier, base_classifier
+using .Classification: SimpleOssammaClassifier, SimpleClassifierConfig
+using .Classification: simple_tiny_classifier, simple_small_classifier, simple_base_classifier
+using .Classification: load_pretrained_encoder
 
 # ============================================================================
 # NER Model (Token-level classification)
@@ -338,7 +615,7 @@ using .NER: RAG_LABELS, ENTITY_TYPES, LABEL_TO_ID, ID_TO_LABEL, NUM_LABELS
 export Dlinoss, Attention, LinearAttention, ossm, LLaDA, Classification, NER
 
 # Main block
-export OssammaBlock, TimeConditionedLayerNorm
+export OssammaBlock, SimpleOssammaBlock, TimeConditionedLayerNorm
 
 # LLaDA model and utilities
 export LLaDAModel, TimeMLPEmbedding, SinusoidalTimeEmbedding
@@ -351,6 +628,7 @@ export masked_cross_entropy, diffusion_loss
 export TrainState, create_train_state, train_step!
 export warmup_cosine_schedule, evaluate, compute_accuracy
 export TrainingConfig, load_training_config, train!
+export load_checkpoint, save_checkpoint
 
 # Provide conventional aliases for the main layer types.
 export DLinOSS, SWAttention, OscSSM
@@ -359,6 +637,9 @@ export DLinOSS, SWAttention, OscSSM
 export OssammaClassifier, ClassifierConfig
 export SequencePooling, FixedTimeEmbedding
 export tiny_classifier, small_classifier, base_classifier
+export SimpleOssammaClassifier, SimpleClassifierConfig
+export simple_tiny_classifier, simple_small_classifier, simple_base_classifier
+export load_pretrained_encoder
 
 # NER model
 export OssammaNER, NERConfig

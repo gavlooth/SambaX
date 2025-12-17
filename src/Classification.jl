@@ -22,6 +22,7 @@ using Statistics: mean
 
 # Import parent module components (assumes we're included from Ossamma module)
 import ..OssammaBlock
+import ..SimpleOssammaBlock
 import ..TimeConditionedLayerNorm
 
 const LuxLayer = Lux.AbstractLuxLayer
@@ -131,7 +132,7 @@ end
 # Ossamma Classifier
 # ============================================================================
 
-struct OssammaClassifier{E, P, T, B, PO, C} <: LuxLayer
+struct OssammaClassifier{E, P, T, B, PO, D, C} <: LuxLayer
     vocab_size::Int
     max_sequence_length::Int
     embedding_dimension::Int
@@ -140,6 +141,7 @@ struct OssammaClassifier{E, P, T, B, PO, C} <: LuxLayer
     num_classes::Int
     pooling_strategy::Symbol
     use_cls_token::Bool
+    dropout_rate::Float32
 
     # Embeddings
     TokenEmbedding::E
@@ -151,6 +153,7 @@ struct OssammaClassifier{E, P, T, B, PO, C} <: LuxLayer
 
     # Classification head
     Pooling::PO
+    Dropout::D
     Classifier::C
 end
 
@@ -177,6 +180,7 @@ function OssammaClassifier(config::ClassifierConfig)
         default_time_step = config.default_time_step,
         pooling = config.pooling,
         use_cls_token = config.use_cls_token,
+        dropout_rate = config.dropout_rate,
     )
 end
 
@@ -195,6 +199,7 @@ function OssammaClassifier(;
     default_time_step::Float32 = 0.1f0,
     pooling::Symbol = :mean,
     use_cls_token::Bool = false,
+    dropout_rate::Float32 = 0.1f0,
 )
     # Add CLS token to vocab if needed
     actual_vocab_size = use_cls_token ? vocab_size + 1 : vocab_size
@@ -224,6 +229,7 @@ function OssammaClassifier(;
         num_classes,
         pooling,
         use_cls_token,
+        dropout_rate,
         # Embeddings
         Lux.Embedding(actual_vocab_size => embedding_dimension),
         Lux.Embedding(max_sequence_length => embedding_dimension),
@@ -232,9 +238,11 @@ function OssammaClassifier(;
         blocks,
         # Classification head
         SequencePooling(pooling),
+        Lux.Dropout(dropout_rate),
         Lux.Chain(
             Lux.LayerNorm((embedding_dimension,)),
             Lux.Dense(embedding_dimension => embedding_dimension, NNlib.gelu),
+            Lux.Dropout(dropout_rate),
             Lux.Dense(embedding_dimension => num_classes),
         ),
     )
@@ -251,6 +259,7 @@ function Lux.initialparameters(rng::Random.AbstractRNG, model::OssammaClassifier
         TimeEmbedding = Lux.initialparameters(rng, model.TimeEmbedding),
         Blocks = block_params,
         Pooling = Lux.initialparameters(rng, model.Pooling),
+        Dropout = Lux.initialparameters(rng, model.Dropout),
         Classifier = Lux.initialparameters(rng, model.Classifier),
     )
 end
@@ -260,13 +269,20 @@ function Lux.initialstates(rng::Random.AbstractRNG, model::OssammaClassifier)
         Tuple(Lux.initialstates(rng, block) for block in model.Blocks)
     )
 
+    # Cache position indices to avoid allocation in forward pass
+    # +1 to account for potential CLS token prepending
+    max_positions = model.use_cls_token ? model.max_sequence_length + 1 : model.max_sequence_length
+    position_indices = collect(1:max_positions)
+
     return (
         TokenEmbedding = Lux.initialstates(rng, model.TokenEmbedding),
         PositionEmbedding = Lux.initialstates(rng, model.PositionEmbedding),
         TimeEmbedding = Lux.initialstates(rng, model.TimeEmbedding),
         Blocks = block_states,
         Pooling = Lux.initialstates(rng, model.Pooling),
+        Dropout = Lux.initialstates(rng, model.Dropout),
         Classifier = Lux.initialstates(rng, model.Classifier),
+        position_indices = position_indices,
     )
 end
 
@@ -281,6 +297,18 @@ function (model::OssammaClassifier)(token_ids::AbstractArray, params, state)
     token_ids_batched = is_batched ? token_ids : reshape(token_ids, :, 1)
 
     # =========================================================================
+    # 0. Auto-prepend CLS token if enabled
+    # =========================================================================
+    if model.use_cls_token
+        # CLS token ID is the last token in expanded vocab
+        cls_token_id = model.vocab_size
+        # Create CLS row with same element type as input
+        cls_row = fill(eltype(token_ids_batched)(cls_token_id), 1, batch_size)
+        token_ids_batched = vcat(cls_row, token_ids_batched)
+        seq_len = seq_len + 1
+    end
+
+    # =========================================================================
     # 1. Token Embedding
     # =========================================================================
     token_flat = vec(token_ids_batched)
@@ -288,9 +316,9 @@ function (model::OssammaClassifier)(token_ids::AbstractArray, params, state)
     token_emb = reshape(token_emb_flat, model.embedding_dimension, seq_len, batch_size)
 
     # =========================================================================
-    # 2. Position Embedding
+    # 2. Position Embedding (using cached indices)
     # =========================================================================
-    position_indices = collect(1:seq_len)
+    position_indices = @view state.position_indices[1:seq_len]
     pos_emb_raw, pos_state = model.PositionEmbedding(position_indices, params.PositionEmbedding, state.PositionEmbedding)
     pos_emb = reshape(pos_emb_raw, model.embedding_dimension, seq_len, 1)
 
@@ -326,7 +354,12 @@ function (model::OssammaClassifier)(token_ids::AbstractArray, params, state)
     # pooled: (embedding_dim, batch)
 
     # =========================================================================
-    # 7. Classification head
+    # 7. Apply dropout after pooling
+    # =========================================================================
+    pooled, dropout_state = model.Dropout(pooled, params.Dropout, state.Dropout)
+
+    # =========================================================================
+    # 8. Classification head
     # =========================================================================
     logits, classifier_state = model.Classifier(pooled, params.Classifier, state.Classifier)
     # logits: (num_classes, batch)
@@ -335,7 +368,7 @@ function (model::OssammaClassifier)(token_ids::AbstractArray, params, state)
     final_logits = is_batched ? logits : dropdims(logits, dims=2)
 
     # =========================================================================
-    # 8. Update State
+    # 9. Update State
     # =========================================================================
     new_block_states = NamedTuple{ntuple(i -> Symbol("Block_$i"), model.number_of_layers)}(
         block_states
@@ -347,7 +380,9 @@ function (model::OssammaClassifier)(token_ids::AbstractArray, params, state)
         TimeEmbedding = time_state,
         Blocks = new_block_states,
         Pooling = pool_state,
+        Dropout = dropout_state,
         Classifier = classifier_state,
+        position_indices = state.position_indices,
     )
 
     return final_logits, new_state
@@ -430,11 +465,545 @@ function base_classifier(;
 end
 
 # ============================================================================
+# SimpleOssammaClassifier (without time conditioning)
+# ============================================================================
+
+"""
+Configuration for simple classifier (no time conditioning).
+"""
+Base.@kwdef struct SimpleClassifierConfig
+    # Architecture
+    vocab_size::Int = 32000
+    max_sequence_length::Int = 512
+    embedding_dimension::Int = 256
+    number_of_heads::Int = 4
+    number_of_layers::Int = 6
+    num_classes::Int = 2
+
+    # Internal dimensions
+    state_dimension::Int = -1  # -1 means use embedding_dimension
+
+    # Attention
+    window_size::Int = 5
+
+    # Oscillator SSM
+    min_frequency::Float32 = 0.1f0
+    max_frequency::Float32 = 10.0f0
+    default_time_step::Float32 = 0.1f0
+
+    # FFN
+    ffn_multiplier::Int = 4
+
+    # Classification
+    pooling::Symbol = :mean
+    dropout_rate::Float32 = 0.1f0
+    use_cls_token::Bool = false
+end
+
+"""
+SimpleOssammaClassifier - Classifier without time conditioning overhead.
+
+Uses SimpleOssammaBlock instead of OssammaBlock:
+- No TimeConditionedLayerNorm (uses standard LayerNorm)
+- No time embedding overhead
+- Includes FFN after attention mixing
+- Built-in dropout
+
+Benefits:
+- Fewer parameters (no time projection layers)
+- Faster forward pass
+- Simpler architecture for classification tasks
+"""
+struct SimpleOssammaClassifier{E, P, B, PO, D, C} <: LuxLayer
+    vocab_size::Int
+    max_sequence_length::Int
+    embedding_dimension::Int
+    number_of_heads::Int
+    number_of_layers::Int
+    num_classes::Int
+    pooling_strategy::Symbol
+    use_cls_token::Bool
+    dropout_rate::Float32
+
+    # Embeddings (no TimeEmbedding needed)
+    TokenEmbedding::E
+    PositionEmbedding::P
+
+    # Encoder blocks (SimpleOssammaBlock)
+    Blocks::B
+
+    # Classification head
+    Pooling::PO
+    Dropout::D
+    Classifier::C
+end
+
+"""
+    SimpleOssammaClassifier(config::SimpleClassifierConfig)
+
+Create a simple classifier from configuration.
+"""
+function SimpleOssammaClassifier(config::SimpleClassifierConfig)
+    state_dimension = config.state_dimension == -1 ? config.embedding_dimension : config.state_dimension
+
+    return SimpleOssammaClassifier(;
+        vocab_size = config.vocab_size,
+        max_sequence_length = config.max_sequence_length,
+        embedding_dimension = config.embedding_dimension,
+        number_of_heads = config.number_of_heads,
+        number_of_layers = config.number_of_layers,
+        num_classes = config.num_classes,
+        state_dimension = state_dimension,
+        window_size = config.window_size,
+        min_frequency = config.min_frequency,
+        max_frequency = config.max_frequency,
+        default_time_step = config.default_time_step,
+        ffn_multiplier = config.ffn_multiplier,
+        pooling = config.pooling,
+        use_cls_token = config.use_cls_token,
+        dropout_rate = config.dropout_rate,
+    )
+end
+
+function SimpleOssammaClassifier(;
+    vocab_size::Int,
+    max_sequence_length::Int,
+    embedding_dimension::Int,
+    number_of_heads::Int,
+    number_of_layers::Int,
+    num_classes::Int,
+    state_dimension::Int = embedding_dimension,
+    window_size::Int = 5,
+    min_frequency::Float32 = 0.1f0,
+    max_frequency::Float32 = 10.0f0,
+    default_time_step::Float32 = 0.1f0,
+    ffn_multiplier::Int = 4,
+    pooling::Symbol = :mean,
+    use_cls_token::Bool = false,
+    dropout_rate::Float32 = 0.1f0,
+)
+    # Add CLS token to vocab if needed
+    actual_vocab_size = use_cls_token ? vocab_size + 1 : vocab_size
+
+    # Build stack of SimpleOssammaBlocks
+    blocks = Tuple([
+        SimpleOssammaBlock(
+            embedding_dimension,
+            max_sequence_length,
+            number_of_heads;
+            state_dimension = state_dimension,
+            window_size = window_size,
+            min_frequency = min_frequency,
+            max_frequency = max_frequency,
+            default_time_step = default_time_step,
+            ffn_multiplier = ffn_multiplier,
+            dropout_rate = dropout_rate,
+        )
+        for _ in 1:number_of_layers
+    ])
+
+    return SimpleOssammaClassifier(
+        actual_vocab_size,
+        max_sequence_length,
+        embedding_dimension,
+        number_of_heads,
+        number_of_layers,
+        num_classes,
+        pooling,
+        use_cls_token,
+        dropout_rate,
+        # Embeddings
+        Lux.Embedding(actual_vocab_size => embedding_dimension),
+        Lux.Embedding(max_sequence_length => embedding_dimension),
+        # Encoder blocks
+        blocks,
+        # Classification head
+        SequencePooling(pooling),
+        Lux.Dropout(dropout_rate),
+        Lux.Chain(
+            Lux.LayerNorm((embedding_dimension,)),
+            Lux.Dense(embedding_dimension => embedding_dimension, NNlib.gelu),
+            Lux.Dropout(dropout_rate),
+            Lux.Dense(embedding_dimension => num_classes),
+        ),
+    )
+end
+
+function Lux.initialparameters(rng::Random.AbstractRNG, model::SimpleOssammaClassifier)
+    block_params = NamedTuple{ntuple(i -> Symbol("Block_$i"), model.number_of_layers)}(
+        Tuple(Lux.initialparameters(rng, block) for block in model.Blocks)
+    )
+
+    return (
+        TokenEmbedding = Lux.initialparameters(rng, model.TokenEmbedding),
+        PositionEmbedding = Lux.initialparameters(rng, model.PositionEmbedding),
+        Blocks = block_params,
+        Pooling = Lux.initialparameters(rng, model.Pooling),
+        Dropout = Lux.initialparameters(rng, model.Dropout),
+        Classifier = Lux.initialparameters(rng, model.Classifier),
+    )
+end
+
+function Lux.initialstates(rng::Random.AbstractRNG, model::SimpleOssammaClassifier)
+    block_states = NamedTuple{ntuple(i -> Symbol("Block_$i"), model.number_of_layers)}(
+        Tuple(Lux.initialstates(rng, block) for block in model.Blocks)
+    )
+
+    # Cache position indices
+    max_positions = model.use_cls_token ? model.max_sequence_length + 1 : model.max_sequence_length
+    position_indices = collect(1:max_positions)
+
+    return (
+        TokenEmbedding = Lux.initialstates(rng, model.TokenEmbedding),
+        PositionEmbedding = Lux.initialstates(rng, model.PositionEmbedding),
+        Blocks = block_states,
+        Pooling = Lux.initialstates(rng, model.Pooling),
+        Dropout = Lux.initialstates(rng, model.Dropout),
+        Classifier = Lux.initialstates(rng, model.Classifier),
+        position_indices = position_indices,
+    )
+end
+
+function (model::SimpleOssammaClassifier)(token_ids::AbstractArray, params, state)
+    # token_ids: (seq_len,) or (seq_len, batch)
+
+    is_batched = ndims(token_ids) == 2
+    seq_len = size(token_ids, 1)
+    batch_size = is_batched ? size(token_ids, 2) : 1
+
+    # Standardize to batched format
+    token_ids_batched = is_batched ? token_ids : reshape(token_ids, :, 1)
+
+    # =========================================================================
+    # 0. Auto-prepend CLS token if enabled
+    # =========================================================================
+    if model.use_cls_token
+        cls_token_id = model.vocab_size
+        cls_row = fill(eltype(token_ids_batched)(cls_token_id), 1, batch_size)
+        token_ids_batched = vcat(cls_row, token_ids_batched)
+        seq_len = seq_len + 1
+    end
+
+    # =========================================================================
+    # 1. Token Embedding
+    # =========================================================================
+    token_flat = vec(token_ids_batched)
+    token_emb_flat, tok_state = model.TokenEmbedding(token_flat, params.TokenEmbedding, state.TokenEmbedding)
+    token_emb = reshape(token_emb_flat, model.embedding_dimension, seq_len, batch_size)
+
+    # =========================================================================
+    # 2. Position Embedding (using cached indices)
+    # =========================================================================
+    position_indices = @view state.position_indices[1:seq_len]
+    pos_emb_raw, pos_state = model.PositionEmbedding(position_indices, params.PositionEmbedding, state.PositionEmbedding)
+    pos_emb = reshape(pos_emb_raw, model.embedding_dimension, seq_len, 1)
+
+    # =========================================================================
+    # 3. Combine Embeddings
+    # =========================================================================
+    hidden = token_emb .+ pos_emb
+
+    # =========================================================================
+    # 4. Process through SimpleOssammaBlocks (no time embedding needed)
+    # =========================================================================
+    (hidden, block_states) = foldl(
+        enumerate(model.Blocks);
+        init = (hidden, ())
+    ) do (h, states), (i, block)
+        block_key = Symbol("Block_$i")
+        block_params = params.Blocks[block_key]
+        block_state = state.Blocks[block_key]
+
+        # SimpleOssammaBlock takes just input (no time tuple)
+        new_h, new_block_state = block(h, block_params, block_state)
+        (new_h, (states..., new_block_state))
+    end
+
+    # =========================================================================
+    # 5. Pool sequence to single vector
+    # =========================================================================
+    pooled, pool_state = model.Pooling(hidden, params.Pooling, state.Pooling)
+
+    # =========================================================================
+    # 6. Apply dropout after pooling
+    # =========================================================================
+    pooled, dropout_state = model.Dropout(pooled, params.Dropout, state.Dropout)
+
+    # =========================================================================
+    # 7. Classification head
+    # =========================================================================
+    logits, classifier_state = model.Classifier(pooled, params.Classifier, state.Classifier)
+
+    # Remove batch dim if input wasn't batched
+    final_logits = is_batched ? logits : dropdims(logits, dims=2)
+
+    # =========================================================================
+    # 8. Update State
+    # =========================================================================
+    new_block_states = NamedTuple{ntuple(i -> Symbol("Block_$i"), model.number_of_layers)}(
+        block_states
+    )
+
+    new_state = (
+        TokenEmbedding = tok_state,
+        PositionEmbedding = pos_state,
+        Blocks = new_block_states,
+        Pooling = pool_state,
+        Dropout = dropout_state,
+        Classifier = classifier_state,
+        position_indices = state.position_indices,
+    )
+
+    return final_logits, new_state
+end
+
+# ============================================================================
+# SimpleOssammaClassifier Convenience Constructors
+# ============================================================================
+
+"""
+    simple_tiny_classifier(; num_classes, vocab_size, kwargs...)
+
+Tiny simple classifier for debugging.
+"""
+function simple_tiny_classifier(;
+    num_classes::Int = 2,
+    vocab_size::Int = 1000,
+    max_sequence_length::Int = 64,
+    kwargs...
+)
+    config = SimpleClassifierConfig(;
+        vocab_size = vocab_size,
+        max_sequence_length = max_sequence_length,
+        embedding_dimension = 64,
+        number_of_heads = 2,
+        number_of_layers = 2,
+        num_classes = num_classes,
+        ffn_multiplier = 4,
+        kwargs...
+    )
+    return SimpleOssammaClassifier(config)
+end
+
+"""
+    simple_small_classifier(; num_classes, vocab_size, kwargs...)
+
+Small simple classifier for experiments.
+"""
+function simple_small_classifier(;
+    num_classes::Int = 2,
+    vocab_size::Int = 32000,
+    max_sequence_length::Int = 256,
+    kwargs...
+)
+    config = SimpleClassifierConfig(;
+        vocab_size = vocab_size,
+        max_sequence_length = max_sequence_length,
+        embedding_dimension = 256,
+        number_of_heads = 4,
+        number_of_layers = 4,
+        num_classes = num_classes,
+        ffn_multiplier = 4,
+        kwargs...
+    )
+    return SimpleOssammaClassifier(config)
+end
+
+"""
+    simple_base_classifier(; num_classes, vocab_size, kwargs...)
+
+Base simple classifier for production.
+"""
+function simple_base_classifier(;
+    num_classes::Int = 2,
+    vocab_size::Int = 32000,
+    max_sequence_length::Int = 512,
+    kwargs...
+)
+    config = SimpleClassifierConfig(;
+        vocab_size = vocab_size,
+        max_sequence_length = max_sequence_length,
+        embedding_dimension = 512,
+        number_of_heads = 8,
+        number_of_layers = 8,
+        num_classes = num_classes,
+        ffn_multiplier = 4,
+        kwargs...
+    )
+    return SimpleOssammaClassifier(config)
+end
+
+# ============================================================================
+# Pretrained Weight Loading
+# ============================================================================
+
+using Serialization
+
+"""
+    load_pretrained_encoder(classifier, checkpoint_path; rng=Random.default_rng())
+
+Load encoder weights from a LLaDA checkpoint into a classifier.
+
+Maps the following weights from LLaDA to classifier:
+- `TokenEmbedding` (handles vocab size mismatch by copying available tokens)
+- `PositionEmbedding` (handles sequence length mismatch)
+- `Blocks.Block_N.*` (copies matching components from OssammaBlock)
+
+Does NOT load:
+- `TimeEmbedding` (LLaDA uses TimeMLPEmbedding, classifier uses FixedTimeEmbedding or none)
+- `FinalNorm` (LLaDA specific)
+- `OutputHead` (LLaDA specific, classifier doesn't have this)
+- `Classifier` head (must be trained fresh for the classification task)
+
+# Arguments
+- `classifier`: An OssammaClassifier or SimpleOssammaClassifier instance
+- `checkpoint_path`: Path to a LLaDA checkpoint (.jls file)
+- `rng`: Random number generator for initializing new parameters
+
+# Returns
+- `(params, state)`: Initialized parameters with pretrained encoder weights and fresh state
+
+# Example
+```julia
+classifier = small_classifier(num_classes=5, vocab_size=32000)
+params, state = load_pretrained_encoder(classifier, "checkpoints/llada_best.jls")
+```
+"""
+function load_pretrained_encoder(
+    classifier::Union{OssammaClassifier, SimpleOssammaClassifier},
+    checkpoint_path::String;
+    rng::Random.AbstractRNG = Random.default_rng(),
+)
+    # Load LLaDA checkpoint
+    checkpoint_data = deserialize(checkpoint_path)
+    llada_params = checkpoint_data[:params]
+
+    # Initialize fresh classifier params and state
+    classifier_params = Lux.initialparameters(rng, classifier)
+    classifier_state = Lux.initialstates(rng, classifier)
+
+    # Copy encoder weights
+    new_params = _copy_encoder_weights(classifier_params, llada_params, classifier)
+
+    return new_params, classifier_state
+end
+
+"""
+Internal function to copy encoder weights from LLaDA to classifier.
+"""
+function _copy_encoder_weights(classifier_params, llada_params, classifier)
+    # Deep copy to avoid mutation
+    new_params = deepcopy(classifier_params)
+
+    # 1. Token Embedding - handle vocab size mismatch
+    if haskey(llada_params, :TokenEmbedding) && haskey(llada_params.TokenEmbedding, :weight)
+        llada_tok = llada_params.TokenEmbedding.weight
+        classifier_tok = new_params.TokenEmbedding.weight
+
+        # Copy as many tokens as possible
+        copy_cols = min(size(llada_tok, 2), size(classifier_tok, 2))
+        @views classifier_tok[:, 1:copy_cols] .= llada_tok[:, 1:copy_cols]
+
+        # Update in new_params (need to reconstruct the NamedTuple)
+        new_params = merge(new_params, (TokenEmbedding = (weight = classifier_tok,),))
+    end
+
+    # 2. Position Embedding - handle sequence length mismatch
+    if haskey(llada_params, :PositionEmbedding) && haskey(llada_params.PositionEmbedding, :weight)
+        llada_pos = llada_params.PositionEmbedding.weight
+        classifier_pos = new_params.PositionEmbedding.weight
+
+        # Copy as many positions as possible
+        copy_cols = min(size(llada_pos, 2), size(classifier_pos, 2))
+        @views classifier_pos[:, 1:copy_cols] .= llada_pos[:, 1:copy_cols]
+
+        new_params = merge(new_params, (PositionEmbedding = (weight = classifier_pos,),))
+    end
+
+    # 3. Blocks - copy matching layers
+    if haskey(llada_params, :Blocks)
+        blocks_params = new_params.Blocks
+        new_blocks = Dict{Symbol, Any}()
+
+        for i in 1:classifier.number_of_layers
+            block_key = Symbol("Block_$i")
+
+            if haskey(llada_params.Blocks, block_key)
+                llada_block = llada_params.Blocks[block_key]
+                classifier_block = blocks_params[block_key]
+
+                # Copy matching sub-components
+                new_block = _copy_block_params(classifier_block, llada_block)
+                new_blocks[block_key] = new_block
+            else
+                new_blocks[block_key] = blocks_params[block_key]
+            end
+        end
+
+        # Reconstruct blocks NamedTuple
+        block_keys = ntuple(i -> Symbol("Block_$i"), classifier.number_of_layers)
+        new_blocks_tuple = NamedTuple{block_keys}(Tuple(new_blocks[k] for k in block_keys))
+        new_params = merge(new_params, (Blocks = new_blocks_tuple,))
+    end
+
+    return new_params
+end
+
+"""
+Copy matching parameters from LLaDA block to classifier block.
+"""
+function _copy_block_params(classifier_block, llada_block)
+    result = Dict{Symbol, Any}()
+
+    for field in keys(classifier_block)
+        if haskey(llada_block, field)
+            # Try to copy recursively
+            result[field] = _copy_params_recursive(classifier_block[field], llada_block[field])
+        else
+            # Keep classifier's initialization
+            result[field] = classifier_block[field]
+        end
+    end
+
+    return NamedTuple{Tuple(keys(result))}(values(result))
+end
+
+"""
+Recursively copy parameters where shapes match.
+"""
+function _copy_params_recursive(dest, src)
+    if src isa AbstractArray && dest isa AbstractArray
+        if size(src) == size(dest)
+            return copy(src)
+        else
+            # Shape mismatch, keep dest
+            return dest
+        end
+    elseif src isa NamedTuple && dest isa NamedTuple
+        result = Dict{Symbol, Any}()
+        for k in keys(dest)
+            if haskey(src, k)
+                result[k] = _copy_params_recursive(dest[k], src[k])
+            else
+                result[k] = dest[k]
+            end
+        end
+        return NamedTuple{Tuple(keys(result))}(values(result))
+    else
+        # Unknown type, keep dest
+        return dest
+    end
+end
+
+# ============================================================================
 # Exports
 # ============================================================================
 
 export OssammaClassifier, ClassifierConfig
 export SequencePooling, FixedTimeEmbedding
 export tiny_classifier, small_classifier, base_classifier
+export SimpleOssammaClassifier, SimpleClassifierConfig
+export simple_tiny_classifier, simple_small_classifier, simple_base_classifier
+export load_pretrained_encoder
 
 end # module
