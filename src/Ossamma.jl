@@ -610,11 +610,39 @@ using .NER: ner_cross_entropy, predict_labels, extract_entities
 using .NER: RAG_LABELS, ENTITY_TYPES, LABEL_TO_ID, ID_TO_LABEL, NUM_LABELS
 
 # ============================================================================
+# CRF Layer (Conditional Random Field for sequence labeling)
+# ============================================================================
+include("CRF.jl")
+using .CRF: LinearChainCRF, CRFTagger
+using .CRF: crf_loss, viterbi_decode
+using .CRF: is_valid_transition, build_transition_mask
+
+# ============================================================================
+# Data Processing Modules
+# ============================================================================
+include("data/NERDataset.jl")
+include("data/Tokenizer.jl")
+include("data/Augmentation.jl")
+
+# ============================================================================
+# Evaluation Metrics
+# ============================================================================
+include("evaluation/NERMetrics.jl")
+
+# ============================================================================
+# Serving Modules
+# ============================================================================
+include("serve/Monitoring.jl")
+include("serve/InferenceServer.jl")
+
+# ============================================================================
 # Exports
 # ============================================================================
 
 # Re-export submodules for callers who want direct access.
 export Dlinoss, Attention, LinearAttention, ossm, LLaDA, Classification, NER
+export CRF, NERDataset, Tokenizer, Augmentation, NERMetrics
+export Monitoring, InferenceServer
 
 # Main block
 export OssammaBlock, OssammaNERBlock, TimeConditionedLayerNorm
@@ -646,5 +674,10 @@ export OssammaNER, NERConfig
 export tiny_ner, small_ner, base_ner
 export ner_cross_entropy, predict_labels, extract_entities
 export RAG_LABELS, ENTITY_TYPES, LABEL_TO_ID, ID_TO_LABEL, NUM_LABELS
+
+# CRF layer
+export LinearChainCRF, CRFTagger
+export crf_loss, viterbi_decode
+export is_valid_transition, build_transition_mask
 
 end
