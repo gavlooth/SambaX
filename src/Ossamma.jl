@@ -608,6 +608,8 @@ using .NER: OssammaNER, NERConfig
 using .NER: tiny_ner, small_ner, base_ner
 using .NER: ner_cross_entropy, predict_labels, extract_entities
 using .NER: RAG_LABELS, ENTITY_TYPES, LABEL_TO_ID, ID_TO_LABEL, NUM_LABELS
+using .NER: load_ner_config, estimate_parameters, print_config_summary
+using .NER: load_training_config as load_ner_training_config
 
 # ============================================================================
 # CRF Layer (Conditional Random Field for sequence labeling)
@@ -674,6 +676,8 @@ export OssammaNER, NERConfig
 export tiny_ner, small_ner, base_ner
 export ner_cross_entropy, predict_labels, extract_entities
 export RAG_LABELS, ENTITY_TYPES, LABEL_TO_ID, ID_TO_LABEL, NUM_LABELS
+export load_ner_config, estimate_parameters, print_config_summary
+export load_ner_training_config
 
 # CRF layer
 export LinearChainCRF, CRFTagger
