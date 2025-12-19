@@ -1,0 +1,273 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1400" width="900" height="1400">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#4F46E5;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#7C3AED;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="embedGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#60A5FA;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3B82F6;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="blockGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#F59E0B;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#D97706;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="gluGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#10B981;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#059669;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="attnGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#EC4899;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#DB2777;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="outputGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#8B5CF6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#7C3AED;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- Drop shadow filter -->
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-opacity="0.2"/>
+    </filter>
+
+    <!-- Arrow marker -->
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#64748B"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="900" height="1400" fill="#F8FAFC"/>
+
+  <!-- Title -->
+  <rect x="50" y="20" width="800" height="60" rx="10" fill="url(#headerGrad)" filter="url(#shadow)"/>
+  <text x="450" y="58" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" font-weight="bold" fill="white">LLaDAModel Architecture</text>
+
+  <!-- Subtitle -->
+  <text x="450" y="100" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#64748B">
+    OSSAMMA: Oscillatory State Space Attention Masked Mixer Architecture
+  </text>
+
+  <!-- ==================== TOP LEVEL: LLaDA Model ==================== -->
+
+  <!-- Input -->
+  <rect x="350" y="130" width="200" height="40" rx="5" fill="#E2E8F0" stroke="#94A3B8" stroke-width="2"/>
+  <text x="450" y="156" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#475569">Input: token_ids, mask_ratio</text>
+
+  <!-- Arrow down -->
+  <line x1="450" y1="170" x2="450" y2="195" stroke="#64748B" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Embeddings row -->
+  <rect x="100" y="200" width="160" height="50" rx="8" fill="url(#embedGrad)" filter="url(#shadow)"/>
+  <text x="180" y="222" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="white">Token Embedding</text>
+  <text x="180" y="240" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#DBEAFE">vocab → dim</text>
+
+  <rect x="370" y="200" width="160" height="50" rx="8" fill="url(#embedGrad)" filter="url(#shadow)"/>
+  <text x="450" y="222" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="white">Position Embedding</text>
+  <text x="450" y="240" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#DBEAFE">pos → dim</text>
+
+  <rect x="640" y="200" width="160" height="50" rx="8" fill="url(#embedGrad)" filter="url(#shadow)"/>
+  <text x="720" y="222" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="white">Time Embedding</text>
+  <text x="720" y="240" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#DBEAFE">sinusoidal + MLP</text>
+
+  <!-- Arrows from embeddings -->
+  <line x1="180" y1="250" x2="180" y2="280" stroke="#64748B" stroke-width="2"/>
+  <line x1="450" y1="250" x2="450" y2="280" stroke="#64748B" stroke-width="2"/>
+  <line x1="180" y1="280" x2="450" y2="280" stroke="#64748B" stroke-width="2"/>
+
+  <!-- Plus symbol for token + position -->
+  <circle cx="315" cy="280" r="12" fill="#3B82F6"/>
+  <text x="315" y="285" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="white">+</text>
+
+  <!-- Arrow down to hidden -->
+  <line x1="450" y1="280" x2="450" y2="310" stroke="#64748B" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Hidden state -->
+  <rect x="300" y="315" width="300" height="35" rx="5" fill="#DBEAFE" stroke="#3B82F6" stroke-width="2"/>
+  <text x="450" y="338" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#1E40AF">hidden (dim, seq_len, batch)</text>
+
+  <!-- Time embedding arrow -->
+  <line x1="720" y1="250" x2="720" y2="600" stroke="#64748B" stroke-width="2" stroke-dasharray="5,5"/>
+  <text x="735" y="420" font-family="Arial, sans-serif" font-size="11" fill="#64748B" transform="rotate(90, 735, 420)">time_emb</text>
+
+  <!-- Arrow to OssammaBlock -->
+  <line x1="450" y1="350" x2="450" y2="380" stroke="#64748B" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- ==================== OSSAMMA BLOCK ==================== -->
+
+  <!-- Main block container -->
+  <rect x="80" y="390" width="620" height="520" rx="15" fill="#FEF3C7" stroke="#F59E0B" stroke-width="3" filter="url(#shadow)"/>
+
+  <!-- Block header -->
+  <rect x="80" y="390" width="620" height="45" rx="15" fill="url(#blockGrad)"/>
+  <rect x="80" y="420" width="620" height="15" fill="url(#blockGrad)"/>
+  <text x="390" y="420" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="white">OssammaBlock × N</text>
+
+  <!-- Residual connection line (left side) -->
+  <line x1="100" y1="460" x2="100" y2="860" stroke="#94A3B8" stroke-width="2" stroke-dasharray="8,4"/>
+  <text x="105" y="660" font-family="Arial, sans-serif" font-size="11" fill="#64748B" transform="rotate(-90, 105, 660)">residual</text>
+
+  <!-- Time-Conditioned LayerNorm -->
+  <rect x="200" y="455" width="400" height="40" rx="6" fill="#FDE68A" stroke="#F59E0B" stroke-width="2"/>
+  <text x="400" y="480" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#92400E">Time-Conditioned LayerNorm</text>
+
+  <!-- Arrow from time_emb to LayerNorm -->
+  <line x1="600" y1="475" x2="720" y2="475" stroke="#64748B" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <polygon points="605,475 612,471 612,479" fill="#64748B"/>
+
+  <!-- Arrow down from LayerNorm -->
+  <line x1="400" y1="495" x2="400" y2="520" stroke="#64748B" stroke-width="2"/>
+
+  <!-- Split into two branches -->
+  <line x1="400" y1="520" x2="260" y2="520" stroke="#64748B" stroke-width="2"/>
+  <line x1="400" y1="520" x2="540" y2="520" stroke="#64748B" stroke-width="2"/>
+  <line x1="260" y1="520" x2="260" y2="540" stroke="#64748B" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <line x1="540" y1="520" x2="540" y2="540" stroke="#64748B" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- ===== GLU Branch (Left) ===== -->
+  <rect x="140" y="545" width="240" height="230" rx="10" fill="#D1FAE5" stroke="#10B981" stroke-width="2"/>
+  <text x="260" y="565" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#065F46">Global-Spectral GLU Branch</text>
+
+  <!-- Dense projection -->
+  <rect x="160" y="580" width="200" height="30" rx="5" fill="url(#gluGrad)"/>
+  <text x="260" y="600" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="white">Dense(d → 2d)</text>
+
+  <!-- Split arrow -->
+  <line x1="260" y1="610" x2="260" y2="625" stroke="#64748B" stroke-width="1.5"/>
+  <line x1="200" y1="625" x2="320" y2="625" stroke="#64748B" stroke-width="1.5"/>
+  <line x1="200" y1="625" x2="200" y2="640" stroke="#64748B" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <line x1="320" y1="625" x2="320" y2="640" stroke="#64748B" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+  <!-- LinearAttention -->
+  <rect x="155" y="645" width="90" height="45" rx="5" fill="#059669"/>
+  <text x="200" y="665" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="white">Linear</text>
+  <text x="200" y="680" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="white">Attention</text>
+
+  <!-- DLinOSS -->
+  <rect x="275" y="645" width="90" height="45" rx="5" fill="#059669"/>
+  <text x="320" y="665" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="white">DLinOSS</text>
+  <text x="320" y="680" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="white">(Oscillator)</text>
+
+  <!-- Arrows down -->
+  <line x1="200" y1="690" x2="200" y2="715" stroke="#64748B" stroke-width="1.5"/>
+  <line x1="320" y1="690" x2="320" y2="705" stroke="#64748B" stroke-width="1.5"/>
+
+  <!-- Sigmoid -->
+  <rect x="295" y="705" width="50" height="20" rx="3" fill="#6EE7B7"/>
+  <text x="320" y="719" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#065F46">sigmoid</text>
+
+  <line x1="320" y1="725" x2="320" y2="735" stroke="#64748B" stroke-width="1.5"/>
+
+  <!-- Gate symbol -->
+  <circle cx="260" cy="735" r="15" fill="#10B981" stroke="#065F46" stroke-width="2"/>
+  <text x="260" y="740" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="white">⊙</text>
+  <line x1="200" y1="715" x2="200" y2="735" stroke="#64748B" stroke-width="1.5"/>
+  <line x1="200" y1="735" x2="245" y2="735" stroke="#64748B" stroke-width="1.5"/>
+  <line x1="275" y1="735" x2="320" y2="735" stroke="#64748B" stroke-width="1.5"/>
+
+  <!-- Output Dense -->
+  <line x1="260" y1="750" x2="260" y2="760" stroke="#64748B" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <rect x="185" y="765" width="150" height="25" rx="4" fill="url(#gluGrad)"/>
+  <text x="260" y="782" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="white">Dense(d → d)</text>
+
+  <!-- ===== SWAttention Branch (Right) ===== -->
+  <rect x="420" y="545" width="240" height="230" rx="10" fill="#FCE7F3" stroke="#EC4899" stroke-width="2"/>
+  <text x="540" y="565" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#9D174D">Local-Sharp Branch</text>
+
+  <rect x="460" y="620" width="160" height="80" rx="8" fill="url(#attnGrad)" filter="url(#shadow)"/>
+  <text x="540" y="650" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="white">SWAttention</text>
+  <text x="540" y="670" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#FBCFE8">Sliding Window</text>
+  <text x="540" y="685" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#FBCFE8">Softmax Attention</text>
+
+  <line x1="540" y1="700" x2="540" y2="765" stroke="#64748B" stroke-width="1.5"/>
+
+  <!-- Arrows to mixing -->
+  <line x1="260" y1="790" x2="260" y2="810" stroke="#64748B" stroke-width="2"/>
+  <line x1="540" y1="765" x2="540" y2="810" stroke="#64748B" stroke-width="2"/>
+  <line x1="260" y1="810" x2="540" y2="810" stroke="#64748B" stroke-width="2"/>
+  <line x1="400" y1="810" x2="400" y2="825" stroke="#64748B" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Adaptive Mixing -->
+  <rect x="250" y="830" width="300" height="40" rx="8" fill="#FDE68A" stroke="#F59E0B" stroke-width="2"/>
+  <text x="400" y="855" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#92400E">Adaptive Mixing: α·GLU + (1-α)·Local</text>
+
+  <!-- Alpha annotation -->
+  <text x="565" y="850" font-family="Arial, sans-serif" font-size="10" fill="#64748B">α = σ(f(x) + α_bias(t))</text>
+
+  <!-- Residual add -->
+  <line x1="400" y1="870" x2="400" y2="890" stroke="#64748B" stroke-width="2"/>
+  <line x1="100" y1="860" x2="100" y2="890" stroke="#94A3B8" stroke-width="2"/>
+  <line x1="100" y1="890" x2="400" y2="890" stroke="#64748B" stroke-width="2"/>
+
+  <circle cx="250" cy="890" r="12" fill="#F59E0B"/>
+  <text x="250" y="895" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="white">+</text>
+
+  <!-- ==================== OUTPUT LAYERS ==================== -->
+
+  <!-- Arrow out of block -->
+  <line x1="400" y1="890" x2="400" y2="930" stroke="#64748B" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Repeat indicator -->
+  <text x="710" y="660" font-family="Arial, sans-serif" font-size="12" fill="#64748B">× N layers</text>
+  <path d="M 705 680 Q 720 750 705 820" stroke="#64748B" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+
+  <!-- Final LayerNorm -->
+  <rect x="300" y="940" width="200" height="35" rx="6" fill="url(#outputGrad)" filter="url(#shadow)"/>
+  <text x="400" y="963" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="white">LayerNorm</text>
+
+  <line x1="400" y1="975" x2="400" y2="1000" stroke="#64748B" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Output Head -->
+  <rect x="275" y="1005" width="250" height="40" rx="8" fill="url(#outputGrad)" filter="url(#shadow)"/>
+  <text x="400" y="1025" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="white">Output Head (Dense)</text>
+  <text x="400" y="1040" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#DDD6FE">dim → vocab_size</text>
+
+  <line x1="400" y1="1045" x2="400" y2="1070" stroke="#64748B" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Output -->
+  <rect x="300" y="1075" width="200" height="35" rx="5" fill="#E2E8F0" stroke="#94A3B8" stroke-width="2"/>
+  <text x="400" y="1098" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#475569">Logits (V, L, B)</text>
+
+  <!-- ==================== DIFFUSION DIAGRAM ==================== -->
+
+  <rect x="50" y="1140" width="800" height="230" rx="15" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="2"/>
+
+  <text x="450" y="1170" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#1E293B">Training Mode: Text Diffusion (Mask-Predict)</text>
+
+  <!-- Forward (masking) -->
+  <rect x="80" y="1200" width="200" height="60" rx="8" fill="#DBEAFE" stroke="#3B82F6" stroke-width="2"/>
+  <text x="180" y="1225" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#1E40AF">"The cat sat on mat"</text>
+  <text x="180" y="1248" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#3B82F6">Clean tokens</text>
+
+  <!-- Arrow -->
+  <line x1="280" y1="1230" x2="330" y2="1230" stroke="#64748B" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="305" y="1220" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#64748B">t→1</text>
+
+  <!-- Masked -->
+  <rect x="340" y="1200" width="220" height="60" rx="8" fill="#FEE2E2" stroke="#EF4444" stroke-width="2"/>
+  <text x="450" y="1225" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#991B1B">[M] [M] [M] [M] [M]</text>
+  <text x="450" y="1248" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#EF4444">Fully masked</text>
+
+  <!-- Arrow -->
+  <line x1="560" y1="1230" x2="610" y2="1230" stroke="#64748B" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="585" y="1220" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#64748B">t→0</text>
+
+  <!-- Denoised -->
+  <rect x="620" y="1200" width="200" height="60" rx="8" fill="#D1FAE5" stroke="#10B981" stroke-width="2"/>
+  <text x="720" y="1225" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#065F46">"The cat sat on mat"</text>
+  <text x="720" y="1248" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#10B981">Iterative denoising</text>
+
+  <!-- Labels -->
+  <text x="180" y="1290" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#475569">Forward (masking)</text>
+  <text x="720" y="1290" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#475569">Reverse (denoising)</text>
+
+  <!-- Confidence arrow -->
+  <text x="450" y="1320" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#64748B">Unmask tokens based on model confidence</text>
+
+  <!-- Legend -->
+  <text x="450" y="1385" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#94A3B8">
+    dim=768 | heads=12 | layers=12 | seq_len=1024 | vocab=32000 (production config)
+  </text>
+</svg>

@@ -1,7 +1,17 @@
 {
   "permissions": {
     "allow": [
-      "WebSearch"
+      "WebSearch",
+      "Bash(git add:*)",
+      "Bash(julia --project=. test/test_attention.jl:*)",
+      "Bash(julia --project=. -e:*)",
+      "Bash(git push)",
+      "Bash(julia --project=. scripts/test_trainability.jl:*)",
+      "Bash(git commit:*)",
+      "Bash(git pull:*)",
+      "Bash(git stash:*)",
+      "Bash(grep:*)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []
