@@ -4,6 +4,10 @@ using Lux
 using Random
 using NNlib
 
+# Helper to avoid SubArray/ReshapedArray issues on CUDA
+# Materializes the array before reshaping to ensure contiguous memory
+materialize_reshape(x, dims...) = reshape(copy(x), dims...)
+
 const LuxAttentionSupertype = isdefined(Lux, :AbstractExplicitLayer) ?
                               Lux.AbstractExplicitLayer :
                               Lux.AbstractLuxLayer
@@ -122,7 +126,8 @@ function (layer::LinearAttentionLayer)(inputs::Tuple, parameters, state)
     query_with_time = query_heads .+ time_broadcast
     key_with_time = key_heads .+ time_broadcast
 
-    collapse_dimensions(tensor) = reshape(tensor, layer.head_dimension, :)
+    # Use materialize_reshape to avoid SubArray issues on CUDA
+    collapse_dimensions(tensor) = materialize_reshape(tensor, layer.head_dimension, :)
     query_features_raw, query_feature_state =
         layer.QueryFeatureLinear(collapse_dimensions(query_with_time), parameters.QueryFeatureLinear, state.QueryFeatureLinear)
     key_features_raw, key_feature_state =

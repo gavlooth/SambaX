@@ -32,20 +32,20 @@ label_smoothing = 0.1
 # Training Hyperparameters
 # =============================================================================
 [training]
-batch_size = 16                 # Conservative for 32GB with 110M params
-gradient_accumulation_steps = 4 # Effective batch size = 64
-learning_rate = 2e-4            # Slightly lower for larger model
+batch_size = 48                 # Aggressive for RTX 5090 32GB VRAM
+gradient_accumulation_steps = 2 # Effective batch size = 96
+learning_rate = 3e-4            # Higher LR for faster convergence
 min_learning_rate = 1e-6
-warmup_steps = 2000             # Longer warmup for stability
-total_steps = 100000            # Full training run
+warmup_steps = 1000             # Faster warmup
+total_steps = 50000             # Training run
 gradient_clip = 1.0
 weight_decay = 0.01
 
 [training.checkpoints]
-eval_every = 500                # Evaluate frequently
-log_every = 50                  # Progress updates
-save_every = 2000               # Save checkpoint
-push_every = 5000               # Push to Git
+eval_every = 250                # Evaluate frequently
+log_every = 25                  # Progress updates
+save_every = 1000               # Save checkpoint
+push_every = 2000               # Push to Git more often
 
 # =============================================================================
 # Data Configuration
