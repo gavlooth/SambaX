@@ -45,6 +45,49 @@ using Zygote
 const USE_CPU = false
 
 # =============================================================================
+# GPU Monitoring Functions
+# =============================================================================
+
+"""Get GPU utilization and memory info"""
+function get_gpu_stats()
+    if !CUDA.functional()
+        return (utilization=0.0, mem_used=0.0, mem_total=0.0, mem_percent=0.0)
+    end
+
+    try
+        # Get memory info
+        mem_info = CUDA.memory_status()
+        mem_used = CUDA.used_memory() / 1e9  # GB
+        mem_total = CUDA.total_memory() / 1e9  # GB
+        mem_percent = (mem_used / mem_total) * 100
+
+        # GPU utilization - read from nvidia-smi
+        utilization = 0.0
+        try
+            output = read(`nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits`, String)
+            utilization = parse(Float64, strip(output))
+        catch
+            utilization = -1.0  # Unable to read
+        end
+
+        return (utilization=utilization, mem_used=mem_used, mem_total=mem_total, mem_percent=mem_percent)
+    catch e
+        return (utilization=0.0, mem_used=0.0, mem_total=0.0, mem_percent=0.0)
+    end
+end
+
+"""Format GPU stats for display"""
+function format_gpu_stats()
+    stats = get_gpu_stats()
+    if stats.utilization < 0
+        return @sprintf("GPU: %.1f/%.1fGB (%.0f%%)", stats.mem_used, stats.mem_total, stats.mem_percent)
+    else
+        return @sprintf("GPU: %.0f%% | Mem: %.1f/%.1fGB (%.0f%%)",
+                       stats.utilization, stats.mem_used, stats.mem_total, stats.mem_percent)
+    end
+end
+
+# =============================================================================
 # Configuration
 # =============================================================================
 
@@ -60,9 +103,9 @@ Base.@kwdef mutable struct TrainingConfig
     window_size::Int = 32
     dropout_rate::Float32 = 0.1f0
 
-    # Training (defaults for GPU - optimized for 32GB VRAM)
-    batch_size::Int = 8
-    gradient_accumulation_steps::Int = 4
+    # Training (defaults for GPU - optimized for 32GB VRAM RTX 5090)
+    batch_size::Int = 32
+    gradient_accumulation_steps::Int = 2
     learning_rate::Float64 = 2e-4
     min_learning_rate::Float64 = 1e-6
     warmup_steps::Int = 500
@@ -649,24 +692,30 @@ function train_production(;
             loss_count += 1
             global_step += 1
 
-            # Update progress bar
-            ProgressMeter.next!(progress;
-                showvalues = [
-                    (:step, global_step),
-                    (:loss, @sprintf("%.4f", loss)),
-                    (:lr, @sprintf("%.2e", lr)),
-                    (:grad_norm, @sprintf("%.2f", grad_norm)),
-                ]
-            )
+            # Update progress bar - only get GPU stats every 10 steps to reduce overhead
+            gpu_info = (use_gpu && global_step % 10 == 0) ? format_gpu_stats() : ""
+            showvals = [
+                (:step, global_step),
+                (:loss, @sprintf("%.4f", loss)),
+                (:lr, @sprintf("%.2e", lr)),
+                (:grad_norm, @sprintf("%.2f", grad_norm)),
+            ]
+            if !isempty(gpu_info)
+                push!(showvals, (:gpu, gpu_info))
+            end
+            ProgressMeter.next!(progress; showvalues = showvals)
 
             # Logging
             if global_step % config.log_every == 0
                 avg_loss = running_loss / loss_count
                 avg_grad_norm = running_grad_norm / loss_count
 
+                # Get GPU stats for logging
+                gpu_log = use_gpu ? " | " * format_gpu_stats() : ""
+
                 println()
-                @printf("Step %d/%d | Loss: %.4f | Grad Norm: %.2f | LR: %.2e\n",
-                    global_step, config.total_steps, avg_loss, avg_grad_norm, lr)
+                @printf("Step %d/%d | Loss: %.4f | Grad Norm: %.2f | LR: %.2e%s\n",
+                    global_step, config.total_steps, avg_loss, avg_grad_norm, lr, gpu_log)
 
                 running_loss = 0.0
                 running_grad_norm = 0.0

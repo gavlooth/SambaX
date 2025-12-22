@@ -17,6 +17,7 @@ using NNlib
 using Statistics: mean
 using TOML
 import CUDA
+using Zygote: @ignore
 
 # Import parent module components
 import ..OssammaNERBlock
@@ -645,7 +646,7 @@ end
     ner_cross_entropy(logits, labels; ignore_index=-100)
 
 Cross-entropy loss for NER, ignoring padding tokens.
-GPU-compatible using NNlib.scatter for one-hot creation.
+GPU-compatible using one-hot matrix multiplication.
 
 - logits: (num_labels, seq_len, batch)
 - labels: (seq_len, batch) integer labels
@@ -654,38 +655,53 @@ function ner_cross_entropy(logits, labels; ignore_index::Int = -100)
     num_labels, seq_len, batch_size = size(logits)
 
     # Flatten
-    logits_flat = reshape(logits, num_labels, :)  # (num_labels, seq_len * batch)
-    labels_flat = vec(labels)  # (seq_len * batch,)
-    n_positions = length(labels_flat)
+    logits_flat = reshape(logits, num_labels, :)  # (num_labels, n_positions)
+    labels_flat = vec(labels)  # (n_positions,)
+    n_positions = @ignore length(labels_flat)
 
-    # Create mask for valid positions
-    valid_mask = labels_flat .!= ignore_index
-    mask_float = Float32.(valid_mask)
-    valid_count = sum(mask_float)
+    # Create mask for valid positions (use @ignore for non-differentiable comparison)
+    valid_mask = @ignore labels_flat .!= ignore_index
+    valid_count = @ignore Float32(sum(valid_mask))
 
-    if valid_count < 1
+    if @ignore valid_count < 1
         return sum(logits_flat) * 0.0f0  # Differentiable zero
     end
 
     # Create safe labels on same device (replace ignore_index with 1)
-    safe_labels = ifelse.(valid_mask, labels_flat, 1)
+    safe_labels = @ignore ifelse.(valid_mask, labels_flat, 1)
 
-    # Compute log softmax
-    log_probs = NNlib.logsoftmax(logits_flat, dims=1)
+    # Compute log softmax - this is the differentiable part
+    log_probs = NNlib.logsoftmax(logits_flat, dims=1)  # (num_labels, n_positions)
 
-    # Create one-hot using NNlib.scatter (GPU-compatible)
-    # scatter(op, src, idx) with idx as tuple of (row_idx, col_idx)
-    # Creates dst where dst[row_idx[i], col_idx[i]] = src[i]
-    is_gpu = logits_flat isa CUDA.CuArray
+    # Create one-hot matrix using broadcasting: (num_labels, n_positions)
+    # one_hot[j, i] = 1.0 if safe_labels[i] == j, else 0.0
+    # This must be done on the same device as logits
+    label_indices = @ignore if logits_flat isa CUDA.CuArray
+        CUDA.cu(collect(1:num_labels))
+    else
+        collect(1:num_labels)
+    end
 
-    src_ones = is_gpu ? CUDA.ones(Float32, n_positions) : ones(Float32, n_positions)
-    col_indices = is_gpu ? CUDA.cu(collect(Int64, 1:n_positions)) : collect(Int64, 1:n_positions)
+    # Broadcast: (num_labels, 1) == (1, n_positions) -> (num_labels, n_positions)
+    one_hot_bool = @ignore reshape(label_indices, num_labels, 1) .== reshape(safe_labels, 1, n_positions)
 
-    # Create one-hot: one_hot[safe_labels[i], i] = 1.0
-    one_hot = NNlib.scatter(+, src_ones, (safe_labels, col_indices); dstsize=(num_labels, n_positions))
+    # Convert to Float32 on same device - this is a constant for backprop
+    one_hot = @ignore if logits_flat isa CUDA.CuArray
+        CUDA.cu(Float32.(Array(one_hot_bool)))
+    else
+        Float32.(one_hot_bool)
+    end
 
-    # Compute per-position cross entropy: -sum(one_hot .* log_probs, dims=1)
+    # Compute cross-entropy: -sum(one_hot .* log_probs, dims=1)
+    # Gradients flow through log_probs, one_hot is treated as constant
     per_pos_ce = -sum(one_hot .* log_probs, dims=1)  # (1, n_positions)
+
+    # Create mask for valid positions
+    mask_float = @ignore if logits_flat isa CUDA.CuArray
+        CUDA.cu(Float32.(valid_mask))
+    else
+        Float32.(valid_mask)
+    end
 
     # Apply mask and compute mean
     masked_ce = vec(per_pos_ce) .* mask_float

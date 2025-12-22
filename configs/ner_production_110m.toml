@@ -32,8 +32,8 @@ label_smoothing = 0.1
 # Training Hyperparameters
 # =============================================================================
 [training]
-batch_size = 8                  # Conservative for 32GB VRAM with 114M params
-gradient_accumulation_steps = 8 # Effective batch size = 64
+batch_size = 32                 # Larger batches for 32GB VRAM with ~15M params
+gradient_accumulation_steps = 2 # Effective batch size = 64
 learning_rate = 3e-4            # Higher LR for faster convergence
 min_learning_rate = 1e-6
 warmup_steps = 1000             # Faster warmup

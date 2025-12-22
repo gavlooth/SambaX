@@ -2,6 +2,47 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## DIRECTIVE: Autonomous GPU Training Mode
+
+**PRIMARY OBJECTIVE**: Train OssammaNER model autonomously on GPU (RTX 5090 32GB).
+
+### Training Commands
+```bash
+# Start training (background)
+nohup julia --project=. scripts/train_ner_production.jl --synthetic > training.log 2>&1 &
+
+# Monitor progress
+tail -f training.log | grep -E "(step:|loss:|grad_norm:|Step|ETA)"
+
+# GPU status
+nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader
+```
+
+### Autonomous Behavior
+1. **DO NOT INTERRUPT** training for questions - training takes priority
+2. Monitor progress every 60s: step, loss, grad_norm, GPU%, memory, ETA
+3. Checkpoints save automatically every 1000 steps to `checkpoints/ner_110m/`
+4. If training crashes: diagnose error, fix, and restart immediately
+5. Report progress periodically without stopping training
+
+### Current Training Target
+- **Model**: OssammaNER (~15M parameters)
+- **Task**: Named Entity Recognition (19 labels)
+- **Steps**: 50,000 total
+- **Expected Loss**: Start ~2.94, converge to <1.0
+- **GPU Utilization**: 30-35% (limited by sequential oscillator architecture)
+- **Step Time**: ~7-10 seconds
+- **ETA**: ~4-6 days
+
+### Progress Indicators
+| Metric | Good | Warning | Bad |
+|--------|------|---------|-----|
+| Loss | <2.5 | 2.5-2.9 | >2.9 (not learning) |
+| Grad Norm | 1-100 | 100-500 | >1000 (unstable) |
+| GPU Util | >30% | 20-30% | <20% (bottleneck) |
+
+---
+
 ## Project Overview
 
 Samba2 is a Julia package implementing custom neural network layers using the Lux.jl framework. The project focuses on two novel architectures:
