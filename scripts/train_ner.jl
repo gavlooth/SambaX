@@ -308,15 +308,17 @@ function train(config::TrainConfig)
         if val_metrics.f1_micro > best_f1
             best_f1 = val_metrics.f1_micro
             println("New best F1! Saving checkpoint...")
-            # serialization would go here
-            # JLD2 or Serialization
+            save_checkpoint(joinpath(config.output_dir, "checkpoint_best.jls");
+                params=ps, state=st, opt_state=opt_state, epoch=epoch, loss=avg_loss)
         end
+        
+        # Always save last checkpoint (overwrite to save space)
+        save_checkpoint(joinpath(config.output_dir, "checkpoint_last.jls");
+            params=ps, state=st, opt_state=opt_state, epoch=epoch, loss=avg_loss)
+            
         println("-" ^ 60)
     end
 end
-    return evaluate_ner(predictions, gold_labels, id_to_label)
-end
-
 
 # =============================================================================
 # Main
