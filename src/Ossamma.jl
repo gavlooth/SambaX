@@ -334,8 +334,8 @@ function SwiGLU(dim::Int; expansion_factor::Float32 = 3f0 / 2f0)
     SwiGLU(
         dim,
         hidden,
-        Lux.Dense(dim => hidden),           # d → 4d/3 (e.g., 384 → 512)
-        Lux.Dense(hidden ÷ 2 => dim)        # 2d/3 → d (e.g., 256 → 384)
+        Lux.Dense(dim => hidden),           # d → 3d/2 (e.g., 384 → 576)
+        Lux.Dense(hidden ÷ 2 => dim)        # 3d/4 → d (e.g., 288 → 384)
     )
 end
 

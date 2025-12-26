@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1600" width="1200" height="1600">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#667eea"/>
+      <stop offset="100%" style="stop-color:#764ba2"/>
+    </linearGradient>
+    <linearGradient id="embedGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#f093fb"/>
+      <stop offset="100%" style="stop-color:#f5576c"/>
+    </linearGradient>
+    <linearGradient id="gluGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#4facfe"/>
+      <stop offset="100%" style="stop-color:#00f2fe"/>
+    </linearGradient>
+    <linearGradient id="localGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#43e97b"/>
+      <stop offset="100%" style="stop-color:#38f9d7"/>
+    </linearGradient>
+    <linearGradient id="outputGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#fa709a"/>
+      <stop offset="100%" style="stop-color:#fee140"/>
+    </linearGradient>
+    <linearGradient id="oscGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#a18cd1"/>
+      <stop offset="100%" style="stop-color:#fbc2eb"/>
+    </linearGradient>
+
+    <!-- Drop shadow -->
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-opacity="0.2"/>
+    </filter>
+
+    <!-- Arrow marker -->
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#555"/>
+    </marker>
+    <marker id="arrowhead-blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#4facfe"/>
+    </marker>
+    <marker id="arrowhead-green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#43e97b"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="1600" fill="#fafbfc"/>
+
+  <!-- Title -->
+  <rect x="50" y="20" width="1100" height="70" rx="10" fill="url(#headerGrad)" filter="url(#shadow)"/>
+  <text x="600" y="55" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="28" font-weight="bold">OssammaNER Architecture</text>
+  <text x="600" y="78" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-family="Arial, sans-serif" font-size="14">Oscillatory State Space Attention Masked Mixer Architecture</text>
+
+  <!-- Input Section -->
+  <rect x="400" y="110" width="400" height="40" rx="8" fill="#e8f4fd" stroke="#2196F3" stroke-width="2" filter="url(#shadow)"/>
+  <text x="600" y="137" text-anchor="middle" font-family="monospace" font-size="14" fill="#1565C0">Input: "Barack Obama visited Paris"</text>
+
+  <!-- Arrow -->
+  <line x1="600" y1="150" x2="600" y2="175" stroke="#555" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Embeddings Box -->
+  <rect x="300" y="180" width="600" height="100" rx="10" fill="url(#embedGrad)" filter="url(#shadow)"/>
+  <text x="600" y="210" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="18" font-weight="bold">Embeddings</text>
+  <text x="400" y="240" text-anchor="middle" fill="white" font-family="monospace" font-size="12">Token Emb</text>
+  <text x="400" y="258" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-family="monospace" font-size="10">V → d</text>
+  <text x="600" y="240" text-anchor="middle" fill="white" font-family="monospace" font-size="12">Position Emb</text>
+  <text x="600" y="258" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-family="monospace" font-size="10">S → d</text>
+  <text x="800" y="240" text-anchor="middle" fill="white" font-family="monospace" font-size="12">Time Emb</text>
+  <text x="800" y="258" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-family="monospace" font-size="10">t=0.5 (fixed)</text>
+
+  <!-- Arrow -->
+  <line x1="600" y1="280" x2="600" y2="305" stroke="#555" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- OssammaNERBlock Container -->
+  <rect x="100" y="310" width="1000" height="950" rx="15" fill="white" stroke="#764ba2" stroke-width="3" stroke-dasharray="10,5" filter="url(#shadow)"/>
+  <rect x="100" y="310" width="1000" height="50" rx="15" fill="url(#headerGrad)"/>
+  <rect x="100" y="335" width="1000" height="25" fill="url(#headerGrad)"/>
+  <text x="600" y="342" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="20" font-weight="bold">OssammaNERBlock (× N layers)</text>
+
+  <!-- Time-Conditioned LayerNorm -->
+  <rect x="200" y="375" width="800" height="50" rx="8" fill="#fff3e0" stroke="#ff9800" stroke-width="2" filter="url(#shadow)"/>
+  <text x="600" y="405" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#e65100">Time-Conditioned LayerNorm</text>
+  <text x="600" y="420" text-anchor="middle" font-family="monospace" font-size="10" fill="#bf360c">scale = 1 + W_s·t, shift = W_h·t, α_bias = W_α·t</text>
+
+  <!-- Arrow splitting into two branches -->
+  <line x1="600" y1="425" x2="600" y2="460" stroke="#555" stroke-width="2"/>
+  <line x1="600" y1="460" x2="350" y2="460" stroke="#4facfe" stroke-width="2"/>
+  <line x1="600" y1="460" x2="850" y2="460" stroke="#43e97b" stroke-width="2"/>
+  <line x1="350" y1="460" x2="350" y2="485" stroke="#4facfe" stroke-width="2" marker-end="url(#arrowhead-blue)"/>
+  <line x1="850" y1="460" x2="850" y2="485" stroke="#43e97b" stroke-width="2" marker-end="url(#arrowhead-green)"/>
+
+  <!-- GLU-Global Branch -->
+  <rect x="150" y="490" width="400" height="400" rx="12" fill="rgba(79,172,254,0.1)" stroke="#4facfe" stroke-width="2"/>
+  <rect x="150" y="490" width="400" height="35" rx="12" fill="url(#gluGrad)"/>
+  <rect x="150" y="510" width="400" height="15" fill="url(#gluGrad)"/>
+  <text x="350" y="513" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="14" font-weight="bold">GLU-Global Branch</text>
+
+  <!-- GLU Projection -->
+  <rect x="200" y="540" width="300" height="40" rx="6" fill="white" stroke="#4facfe" stroke-width="1.5"/>
+  <text x="350" y="565" text-anchor="middle" font-family="monospace" font-size="12" fill="#0277bd">Dense(d → 2d) → split</text>
+
+  <!-- Arrow splitting -->
+  <line x1="350" y1="580" x2="350" y2="600" stroke="#555" stroke-width="1.5"/>
+  <line x1="350" y1="600" x2="270" y2="600" stroke="#555" stroke-width="1.5"/>
+  <line x1="350" y1="600" x2="430" y2="600" stroke="#555" stroke-width="1.5"/>
+  <line x1="270" y1="600" x2="270" y2="620" stroke="#555" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <line x1="430" y1="600" x2="430" y2="620" stroke="#555" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+  <!-- LinearAttention -->
+  <rect x="180" y="625" width="180" height="70" rx="6" fill="url(#gluGrad)" filter="url(#shadow)"/>
+  <text x="270" y="650" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="12" font-weight="bold">LinearAttention</text>
+  <text x="270" y="668" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-family="monospace" font-size="9">φ(Q)(φ(K)ᵀV)</text>
+  <text x="270" y="683" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-family="monospace" font-size="9">O(n) global</text>
+
+  <!-- DLinOSS -->
+  <rect x="340" y="625" width="180" height="70" rx="6" fill="url(#oscGrad)" filter="url(#shadow)"/>
+  <text x="430" y="650" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="12" font-weight="bold">DLinOSS</text>
+  <text x="430" y="668" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-family="monospace" font-size="9">ρ·R(θ)·x + B·u</text>
+  <text x="430" y="683" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-family="monospace" font-size="9">damped oscillators</text>
+
+  <!-- Arrows down from both -->
+  <line x1="270" y1="695" x2="270" y2="720" stroke="#555" stroke-width="1.5"/>
+  <line x1="430" y1="695" x2="430" y2="720" stroke="#555" stroke-width="1.5"/>
+
+  <!-- Sigmoid on DLinOSS output -->
+  <circle cx="430" cy="730" r="15" fill="#fff" stroke="#a18cd1" stroke-width="2"/>
+  <text x="430" y="735" text-anchor="middle" font-family="monospace" font-size="10" fill="#7b1fa2">σ</text>
+
+  <!-- Multiply symbol -->
+  <line x1="270" y1="720" x2="270" y2="760" stroke="#555" stroke-width="1.5"/>
+  <line x1="430" y1="745" x2="430" y2="760" stroke="#555" stroke-width="1.5"/>
+  <line x1="270" y1="760" x2="350" y2="760" stroke="#555" stroke-width="1.5"/>
+  <line x1="430" y1="760" x2="350" y2="760" stroke="#555" stroke-width="1.5"/>
+  <circle cx="350" cy="775" r="15" fill="#4facfe" stroke="#0277bd" stroke-width="2"/>
+  <text x="350" y="780" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="white">⊙</text>
+
+  <!-- GLU Output Projection -->
+  <line x1="350" y1="790" x2="350" y2="810" stroke="#555" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <rect x="225" y="815" width="250" height="35" rx="6" fill="white" stroke="#4facfe" stroke-width="1.5"/>
+  <text x="350" y="838" text-anchor="middle" font-family="monospace" font-size="11" fill="#0277bd">Dense(d → d) → glu_out</text>
+
+  <!-- Local-Sharp Branch -->
+  <rect x="650" y="490" width="400" height="400" rx="12" fill="rgba(67,233,123,0.1)" stroke="#43e97b" stroke-width="2"/>
+  <rect x="650" y="490" width="400" height="35" rx="12" fill="url(#localGrad)"/>
+  <rect x="650" y="510" width="400" height="15" fill="url(#localGrad)"/>
+  <text x="850" y="513" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="14" font-weight="bold">Local-Sharp Branch</text>
+
+  <!-- Input Gate -->
+  <rect x="700" y="540" width="300" height="55" rx="6" fill="white" stroke="#43e97b" stroke-width="1.5"/>
+  <text x="850" y="562" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#2e7d32">Input Gate (from GLU)</text>
+  <text x="850" y="582" text-anchor="middle" font-family="monospace" font-size="10" fill="#1b5e20">gated_x = x · σ(W_ig · glu_out)</text>
+
+  <!-- Arrow from GLU to Input Gate -->
+  <path d="M 475 832 Q 560 832 560 750 Q 560 570 680 570" fill="none" stroke="#4facfe" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <polygon points="680,567 690,570 680,573" fill="#4facfe"/>
+  <text x="590" y="690" font-family="monospace" font-size="9" fill="#4facfe">gates input</text>
+
+  <!-- Arrow to SWAttention -->
+  <line x1="850" y1="595" x2="850" y2="620" stroke="#555" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+  <!-- SWAttention -->
+  <rect x="700" y="625" width="300" height="80" rx="6" fill="url(#localGrad)" filter="url(#shadow)"/>
+  <text x="850" y="652" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="13" font-weight="bold">SWAttention</text>
+  <text x="850" y="672" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-family="monospace" font-size="10">Sliding Window Attention</text>
+  <text x="850" y="692" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-family="monospace" font-size="9">sigsoftmax(QKᵀ/√d · mask) · V</text>
+
+  <!-- Arrow down -->
+  <line x1="850" y1="705" x2="850" y2="730" stroke="#555" stroke-width="1.5"/>
+
+  <!-- Local output -->
+  <rect x="725" y="815" width="250" height="35" rx="6" fill="white" stroke="#43e97b" stroke-width="1.5"/>
+  <text x="850" y="838" text-anchor="middle" font-family="monospace" font-size="11" fill="#2e7d32">local_out</text>
+
+  <!-- Arrow down from both branches to merge -->
+  <line x1="350" y1="850" x2="350" y2="900" stroke="#4facfe" stroke-width="2"/>
+  <line x1="850" y1="850" x2="850" y2="900" stroke="#43e97b" stroke-width="2"/>
+
+  <!-- Alpha Mixing -->
+  <rect x="250" y="905" width="700" height="65" rx="8" fill="#fff8e1" stroke="#ffc107" stroke-width="2" filter="url(#shadow)"/>
+  <text x="600" y="930" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#f57f17">Adaptive α-Mixing</text>
+  <text x="600" y="955" text-anchor="middle" font-family="monospace" font-size="12" fill="#ff8f00">out = α · glu_out + (1-α) · local_out</text>
+  <text x="600" y="968" text-anchor="middle" font-family="monospace" font-size="10" fill="#e65100">where α = σ(W_α · mean_pool(x) + α_bias(t))</text>
+
+  <!-- Arrow -->
+  <line x1="600" y1="970" x2="600" y2="995" stroke="#555" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- SwiGLU FFN -->
+  <rect x="300" y="1000" width="600" height="65" rx="8" fill="#f3e5f5" stroke="#9c27b0" stroke-width="2" filter="url(#shadow)"/>
+  <text x="600" y="1025" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#6a1b9a">SwiGLU FFN</text>
+  <text x="600" y="1048" text-anchor="middle" font-family="monospace" font-size="11" fill="#7b1fa2">Dense(d → 3d/2) → split → Swish(a) ⊙ b → Dense(3d/4 → d)</text>
+
+  <!-- Residual connection -->
+  <path d="M 150 400 L 120 400 L 120 1100 L 280 1100" fill="none" stroke="#555" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <text x="125" y="750" font-family="monospace" font-size="10" fill="#555" transform="rotate(-90 125 750)">residual</text>
+
+  <!-- Arrow -->
+  <line x1="600" y1="1065" x2="600" y2="1085" stroke="#555" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Output LayerNorm + Residual -->
+  <rect x="250" y="1090" width="700" height="45" rx="8" fill="#e8f5e9" stroke="#4caf50" stroke-width="2" filter="url(#shadow)"/>
+  <text x="600" y="1120" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#2e7d32">Residual + LayerNorm</text>
+
+  <!-- Plus symbol for residual -->
+  <circle cx="300" cy="1112" r="15" fill="#4caf50"/>
+  <text x="300" y="118" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="white">+</text>
+  <line x1="280" y1="1100" x2="285" y2="1112" stroke="#555" stroke-width="1.5"/>
+
+  <!-- Repeat indicator -->
+  <text x="1080" y="750" text-anchor="middle" font-family="Arial, sans-serif" font-size="40" fill="#764ba2" opacity="0.3">×N</text>
+
+  <!-- Arrow out of block -->
+  <line x1="600" y1="1135" x2="600" y2="1165" stroke="#555" stroke-width="2"/>
+
+  <!-- End of block region -->
+
+  <!-- Arrow to Classification -->
+  <line x1="600" y1="1260" x2="600" y2="1295" stroke="#555" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Classification Head -->
+  <rect x="300" y="1300" width="600" height="70" rx="10" fill="url(#outputGrad)" filter="url(#shadow)"/>
+  <text x="600" y="1328" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="16" font-weight="bold">Classification Head</text>
+  <text x="600" y="1355" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-family="monospace" font-size="12">LayerNorm → Dropout → Dense(d → 19)</text>
+
+  <!-- Arrow -->
+  <line x1="600" y1="1370" x2="600" y2="1400" stroke="#555" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- CRF Layer -->
+  <rect x="350" y="1405" width="500" height="60" rx="10" fill="#e3f2fd" stroke="#1976d2" stroke-width="2" filter="url(#shadow)"/>
+  <text x="600" y="1432" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#0d47a1">CRF Layer (Optional)</text>
+  <text x="600" y="1452" text-anchor="middle" font-family="monospace" font-size="11" fill="#1565c0">Viterbi decoding for valid BIO sequences</text>
+
+  <!-- Arrow -->
+  <line x1="600" y1="1465" x2="600" y2="1495" stroke="#555" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Output -->
+  <rect x="300" y="1500" width="600" height="50" rx="8" fill="#e8f4fd" stroke="#2196F3" stroke-width="2" filter="url(#shadow)"/>
+  <text x="600" y="1532" text-anchor="middle" font-family="monospace" font-size="13" fill="#1565C0">[B-PERSON, I-PERSON, O, B-PLACE]</text>
+
+  <!-- Legend -->
+  <rect x="50" y="1560" width="1100" height="30" rx="5" fill="#f5f5f5" stroke="#ddd"/>
+  <text x="100" y="1580" font-family="Arial, sans-serif" font-size="11" fill="#555">Legend:</text>
+  <rect x="170" y="1568" width="20" height="12" rx="2" fill="url(#gluGrad)"/>
+  <text x="200" y="1580" font-family="Arial, sans-serif" font-size="10" fill="#555">Global O(n)</text>
+  <rect x="290" y="1568" width="20" height="12" rx="2" fill="url(#localGrad)"/>
+  <text x="320" y="1580" font-family="Arial, sans-serif" font-size="10" fill="#555">Local Window</text>
+  <rect x="420" y="1568" width="20" height="12" rx="2" fill="url(#oscGrad)"/>
+  <text x="450" y="1580" font-family="Arial, sans-serif" font-size="10" fill="#555">Oscillator SSM</text>
+  <line x1="560" y1="1575" x2="590" y2="1575" stroke="#555" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <text x="600" y="1580" font-family="Arial, sans-serif" font-size="10" fill="#555">Gating/Residual</text>
+  <circle cx="730" cy="1574" r="8" fill="#4facfe" stroke="#0277bd" stroke-width="1"/>
+  <text x="730" y="1578" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="white">⊙</text>
+  <text x="750" y="1580" font-family="Arial, sans-serif" font-size="10" fill="#555">Element-wise multiply</text>
+</svg>

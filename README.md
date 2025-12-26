@@ -47,7 +47,7 @@
     │           └────────┬────────┘                                 │
     │                    ▼                                          │
     │           ┌─────────────────┐                                 │
-    │           │   SwiGLU FFN    │  d → 4d/3 → split → swish⊙ → d  │
+    │           │   SwiGLU FFN    │  d → 3d/2 → split → swish⊙ → d  │
     │           │   + Residual    │  (transform nonlinearity)       │
     │           └─────────────────┘                                 │
     └───────────────────────────────────────────────────────────────┘
@@ -114,10 +114,10 @@ Swish-Gated Linear Unit feed-forward network from "GLU Variants Improve Transfor
 ```
 FFN(x) = Dense(Swish(a) ⊙ b) where [a, b] = split(Dense(x))
 
-Expansion: d → 4d/3 → split → swish(half) ⊙ other → d
+Expansion: d → 3d/2 → split → swish(half) ⊙ other → d
 ```
 
-Provides transform-type nonlinearity after the α-mixing step. The 4/3 expansion factor yields a power-of-2 split dimension (e.g., 384 → 512 → 256 split → 384).
+Provides transform-type nonlinearity after the α-mixing step. The 3/2 expansion factor (e.g., 384 → 576 → 288 split → 384).
 
 ## NER Label Schema
 
