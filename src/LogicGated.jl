@@ -15,6 +15,8 @@ export gate_entropy, expert_utilization, load_balance_loss, expert_dropout
 export disagreement_score, conflict_mask
 export fuse_experts_gated_sum, gather_spans, scatter_spans
 export ExpertCache, init_cache, update_cache, apply_cache
+export active_experts_schedule, apply_expert_mask
+export expert_confusion_matrix, collapse_alert, router_metrics, misroute_rate
 export EXPERT_LOGIC, EXPERT_LANGUAGE, EXPERT_MATH, EXPERT_MEMORY, EXPERT_NAMES
 
 const EXPERT_LOGIC = 1
@@ -268,6 +270,49 @@ function expert_dropout(
 end
 
 """
+    active_experts_schedule(step; logic_start=10000, math_start=20000, memory_start=30000)
+
+Warmup schedule for expert activation. Returns a Bool vector (num_experts).
+"""
+function active_experts_schedule(
+    step::Int;
+    logic_start::Int = 10000,
+    math_start::Int = 20000,
+    memory_start::Int = 30000
+)
+    active = trues(4)
+    # Always keep Language (index 2) active
+    active .= false
+    active[EXPERT_LANGUAGE] = true
+    if step >= logic_start
+        active[EXPERT_LOGIC] = true
+    end
+    if step >= math_start
+        active[EXPERT_MATH] = true
+    end
+    if step >= memory_start
+        active[EXPERT_MEMORY] = true
+    end
+    return active
+end
+
+"""
+    apply_expert_mask(gates, active)
+
+Zero out inactive experts and renormalize.
+"""
+function apply_expert_mask(gates::AbstractArray, active::AbstractVector{Bool})
+    g = copy(gates)
+    for e in 1:length(active)
+        if !active[e]
+            g[e, :, :] .= 0
+        end
+    end
+    norm = sum(g, dims = 1)
+    return g ./ (norm .+ 1f-10)
+end
+
+"""
     disagreement_score(expert_outputs)
 
 Compute per-token disagreement based on variance across experts.
@@ -319,6 +364,73 @@ function topk_indices(gates::AbstractArray, k::Int)
         end
         return idx
     end
+end
+
+"""
+    expert_confusion_matrix(preds, labels; num_experts=4, ignore_index=0)
+
+Compute confusion matrix of predicted vs. target expert.
+"""
+function expert_confusion_matrix(
+    preds::AbstractArray,
+    labels::AbstractArray;
+    num_experts::Int = 4,
+    ignore_index::Int = 0
+)
+    cm = zeros(Int, num_experts, num_experts)
+    for i in eachindex(labels)
+        lbl = labels[i]
+        if lbl != ignore_index
+            cm[lbl, preds[i]] += 1
+        end
+    end
+    return cm
+end
+
+"""
+    collapse_alert(utilization; threshold=0.6)
+
+Return true if any expert exceeds usage threshold.
+"""
+collapse_alert(utilization::AbstractVector; threshold::Float32 = 0.6f0) =
+    any(utilization .>= threshold)
+
+"""
+    router_metrics(gates, labels; hard=false, ignore_index=0)
+
+Convenience bundle of routing metrics.
+"""
+function router_metrics(
+    gates::AbstractArray,
+    labels::AbstractArray;
+    hard::Bool = false,
+    ignore_index::Int = 0
+)
+    acc = router_accuracy(gates, labels; ignore_index = ignore_index)
+    ent = gate_entropy(gates)
+    util = expert_utilization(gates; hard = hard)
+    bal = load_balance_loss(gates; hard = hard)
+    return (
+        accuracy = acc,
+        misroute = 1.0f0 - acc,
+        entropy = ent,
+        utilization = util,
+        balance_loss = bal,
+        collapse = collapse_alert(util)
+    )
+end
+
+"""
+    misroute_rate(gates, labels; ignore_index=0)
+
+Return 1 - routing accuracy.
+"""
+function misroute_rate(
+    gates::AbstractArray,
+    labels::AbstractArray;
+    ignore_index::Int = 0
+)
+    return 1.0f0 - router_accuracy(gates, labels; ignore_index = ignore_index)
 end
 
 # -----------------------------------------------------------------------------

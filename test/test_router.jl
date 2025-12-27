@@ -65,3 +65,22 @@ end
     updated = apply_cache(cache, copy(expert_outputs))
     @test size(updated) == size(expert_outputs)
 end
+
+@testset "Metrics and Schedules" begin
+    gates = NNlib.softmax(randn(Float32, 4, 6), dims = 1)
+    labels = rand(1:4, 6)
+    metrics = router_metrics(gates, labels)
+    @test haskey(metrics, :accuracy)
+    @test haskey(metrics, :collapse)
+
+    active = active_experts_schedule(15000)
+    @test active[EXPERT_LOGIC]
+    @test active[EXPERT_LANGUAGE]
+
+    masked = apply_expert_mask(gates, active)
+    @test size(masked) == size(gates)
+
+    preds = top1_expert(gates)
+    cm = expert_confusion_matrix(preds, labels)
+    @test size(cm) == (4, 4)
+end
