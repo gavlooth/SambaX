@@ -308,14 +308,18 @@ export DrafterConfig, load_drafter_config, default_granite_config, default_qwen3
 # =============================================================================
 # Vocabulary Constants for Supported AR Models
 # =============================================================================
-const GRANITE_VOCAB_SIZE = 100352   # IBM Granite 4.0 (smallest, recommended)
+# Verified vocab sizes from HuggingFace config.json files:
+const GRANITE_VOCAB_SIZE = 49155    # IBM Granite 3.1 (granite-3.1-2b-instruct)
+const GRANITE_4_VOCAB_SIZE = 49160  # IBM Granite 4.0 (granite-4.0-tiny-preview)
 const QWEN3_VOCAB_SIZE = 151936     # Alibaba Qwen3
 const LLAMA3_VOCAB_SIZE = 128256    # Meta Llama 3.x
 
-# Default mask token IDs (verify with actual tokenizer)
-const GRANITE_MASK_TOKEN_ID = 100256
-const QWEN3_MASK_TOKEN_ID = 151643
-const LLAMA3_MASK_TOKEN_ID = 128255
+# Mask token IDs for TiDAR (Julia 1-based indices)
+# Using last vocab position since these models don't have built-in [MASK] tokens
+const GRANITE_MASK_TOKEN_ID = GRANITE_VOCAB_SIZE      # Last token for Granite 3.1 (1-based)
+const GRANITE_4_MASK_TOKEN_ID = GRANITE_4_VOCAB_SIZE  # Last token for Granite 4.0 (1-based)
+const QWEN3_MASK_TOKEN_ID = QWEN3_VOCAB_SIZE          # Last token for Qwen3 (1-based)
+const LLAMA3_MASK_TOKEN_ID = LLAMA3_VOCAB_SIZE        # Last token for Llama 3.x (1-based)
 
 # -----------------------------------------------------------------------------
 # Sinusoidal Time Embedding (for diffusion timestep)
@@ -436,9 +440,9 @@ end
 Configuration for OssammaDrafter model.
 
 # Fields
-- `ar_model::String`: AR verifier model name ("granite", "qwen3", "llama3")
+- `ar_model::String`: AR verifier model name ("granite", "granite4", "qwen3", "llama3")
 - `vocab_size::Int`: Vocabulary size (auto-set based on ar_model)
-- `mask_token_id::Int`: Token ID for [MASK] (auto-set based on ar_model)
+- `mask_token_id::Int`: Token ID for [MASK] (auto-set based on ar_model; can be > vocab_size to reserve an extra token)
 - `max_sequence_length::Int`: Maximum sequence length
 - `embedding_dimension::Int`: Model hidden dimension
 - `number_of_heads::Int`: Number of attention heads
@@ -487,9 +491,9 @@ function default_granite_config(;
     kwargs...
 )
     return DrafterConfig(;
-        ar_model = "granite",
-        vocab_size = GRANITE_VOCAB_SIZE,
-        mask_token_id = GRANITE_MASK_TOKEN_ID,
+        ar_model = "granite4",
+        vocab_size = GRANITE_4_VOCAB_SIZE,
+        mask_token_id = GRANITE_4_MASK_TOKEN_ID,
         embedding_dimension = embedding_dimension,
         number_of_layers = number_of_layers,
         number_of_heads = number_of_heads,
@@ -532,17 +536,21 @@ function load_drafter_config(path::String)
     if !haskey(config_dict, "vocab_size")
         config_dict["vocab_size"] = if ar_model == "granite"
             GRANITE_VOCAB_SIZE
+        elseif ar_model == "granite4" || ar_model == "granite_4"
+            GRANITE_4_VOCAB_SIZE
         elseif ar_model == "qwen3"
             QWEN3_VOCAB_SIZE
         elseif ar_model == "llama3"
             LLAMA3_VOCAB_SIZE
         else
-            error("Unknown ar_model: $ar_model. Use 'granite', 'qwen3', or 'llama3'.")
+            error("Unknown ar_model: $ar_model. Use 'granite', 'granite4', 'qwen3', or 'llama3'.")
         end
     end
     if !haskey(config_dict, "mask_token_id")
         config_dict["mask_token_id"] = if ar_model == "granite"
             GRANITE_MASK_TOKEN_ID
+        elseif ar_model == "granite4" || ar_model == "granite_4"
+            GRANITE_4_MASK_TOKEN_ID
         elseif ar_model == "qwen3"
             QWEN3_MASK_TOKEN_ID
         elseif ar_model == "llama3"
@@ -635,8 +643,10 @@ function OssammaDrafter(;
         for _ in 1:number_of_layers
     ]
 
+    actual_vocab_size = max(vocab_size, mask_token_id)
+
     return OssammaDrafter(
-        vocab_size,
+        actual_vocab_size,
         max_sequence_length,
         embedding_dimension,
         number_of_heads,
@@ -644,12 +654,12 @@ function OssammaDrafter(;
         time_dimension,
         mask_token_id,
         # Layers
-        Lux.Embedding(vocab_size => embedding_dimension),
+        Lux.Embedding(actual_vocab_size => embedding_dimension),
         Lux.Embedding(max_sequence_length => embedding_dimension),
         TimeMLPEmbedding(time_dimension, embedding_dimension),
         blocks,
         Lux.LayerNorm((embedding_dimension,)),
-        Lux.Dense(embedding_dimension => vocab_size),  # LM Head
+        Lux.Dense(embedding_dimension => actual_vocab_size),  # LM Head
     )
 end
 

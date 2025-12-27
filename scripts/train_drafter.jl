@@ -80,6 +80,18 @@ function parse_commandline()
             help = "Fraction of tokens to mask"
             arg_type = Float64
             default = 0.15
+        "--mask-strategy"
+            help = "Masking strategy: random | suffix | mixed"
+            arg_type = String
+            default = "mixed"
+        "--draft-length"
+            help = "Suffix length for TiDAR-style masking"
+            arg_type = Int
+            default = 8
+        "--suffix-prob"
+            help = "Probability of suffix masking when using mixed strategy"
+            arg_type = Float64
+            default = 0.5
         "--alpha"
             help = "MLM loss weight (1-alpha = distillation weight)"
             arg_type = Float64
@@ -126,8 +138,17 @@ function load_text_data(path::String; max_length::Int = 512)
     return TextDataset(texts, max_length)
 end
 
-function sample_batch(dataset::TextDataset, batch_size::Int, vocab_size::Int, mask_token_id::Int;
-                      rng = Random.default_rng())
+function sample_batch(
+    dataset::TextDataset,
+    batch_size::Int,
+    vocab_size::Int,
+    mask_token_id::Int;
+    rng = Random.default_rng(),
+    mask_ratio::Float64 = 0.15,
+    mask_strategy::Symbol = :mixed,
+    draft_length::Int = 8,
+    suffix_prob::Float64 = 0.5
+)
     n = length(dataset.texts)
     if n == 0
         error("Dataset is empty")
@@ -153,10 +174,20 @@ function sample_batch(dataset::TextDataset, batch_size::Int, vocab_size::Int, ma
             token_ids[i, b] = (Int(chars[i]) % (vocab_size - 1)) + 1
         end
 
-        # Apply random masking
-        for i in 1:seq_len
-            if rand(rng) < 0.15
+        # Apply masking strategy
+        use_suffix = mask_strategy == :suffix ||
+            (mask_strategy == :mixed && rand(rng) < suffix_prob)
+
+        if use_suffix
+            start_pos = max(seq_len - draft_length + 1, 1)
+            for i in start_pos:seq_len
                 mask_positions[i, b] = true
+            end
+        else
+            for i in 1:seq_len
+                if rand(rng) < mask_ratio
+                    mask_positions[i, b] = true
+                end
             end
         end
     end
@@ -302,6 +333,9 @@ function main()
         :log_every => args["log-every"],
         :alpha => args["alpha"],
         :mask_ratio => args["mask-ratio"],
+        :mask_strategy => args["mask-strategy"],
+        :draft_length => args["draft-length"],
+        :suffix_prob => args["suffix-prob"],
     )
 
     println("\nTraining config:")
@@ -323,8 +357,17 @@ function main()
         Optimisers.adjust!(opt_state, lr)
 
         # Sample batch
-        batch = sample_batch(dataset, args["batch-size"], model_config.vocab_size,
-                            model_config.mask_token_id; rng=rng)
+        batch = sample_batch(
+            dataset,
+            args["batch-size"],
+            model_config.vocab_size,
+            model_config.mask_token_id;
+            rng = rng,
+            mask_ratio = args["mask-ratio"],
+            mask_strategy = Symbol(args["mask-strategy"]),
+            draft_length = args["draft-length"],
+            suffix_prob = args["suffix-prob"]
+        )
 
         # Random diffusion time for this batch
         t = rand(rng, Float32)

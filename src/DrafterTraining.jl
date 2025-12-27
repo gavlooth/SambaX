@@ -261,6 +261,9 @@ Base.@kwdef struct DrafterTrainingConfig
     alpha::Float32 = 0.5f0           # MLM weight (1-alpha = distillation weight)
     temperature::Float32 = 1.0f0     # Distillation temperature
     mask_ratio::Float32 = 0.15f0     # Fraction of tokens to mask
+    mask_strategy::Symbol = :mixed   # :random | :suffix | :mixed
+    draft_length::Int = 8            # Suffix length for TiDAR-style masking
+    suffix_prob::Float32 = 0.5f0     # Probability of suffix masking (mixed)
 
     # Checkpointing
     checkpoint_dir::String = "checkpoints/drafter"
@@ -355,6 +358,30 @@ function apply_block_mask(
     )
 end
 
-export apply_random_mask, apply_block_mask, DrafterTrainingConfig
+"""
+    apply_suffix_mask(token_ids, mask_token_id, block_size)
+
+Apply suffix masking for TiDAR-style training.
+Masks the last `block_size` tokens of the sequence.
+"""
+function apply_suffix_mask(
+    token_ids::AbstractVector,
+    mask_token_id::Int,
+    block_size::Int
+)
+    seq_len = length(token_ids)
+    if block_size <= 0
+        return (
+            masked_ids = copy(token_ids),
+            mask_positions = falses(seq_len),
+            original_ids = token_ids,
+        )
+    end
+
+    start_pos = max(seq_len - block_size + 1, 1)
+    return apply_block_mask(token_ids, mask_token_id, block_size, start_pos)
+end
+
+export apply_random_mask, apply_block_mask, apply_suffix_mask, DrafterTrainingConfig
 
 end # module DrafterTraining

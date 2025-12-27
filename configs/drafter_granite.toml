@@ -9,10 +9,12 @@
 #   drafter = OssammaDrafter(config)
 
 # AR Model Selection
-# Options: "granite", "qwen3", "llama3"
-ar_model = "granite"
+# Options: "granite", "granite4", "qwen3", "llama3"
+ar_model = "granite4"
 
 # vocab_size and mask_token_id are auto-determined from ar_model
+# NOTE: Token IDs are 1-based in Julia. If you copy IDs from HF config.json, add +1.
+# If you want a dedicated [MASK] outside the base vocab, set mask_token_id = vocab_size + 1.
 # Uncomment to override:
 # vocab_size = 100352
 # mask_token_id = 100256

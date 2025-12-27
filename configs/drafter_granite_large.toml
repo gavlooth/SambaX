@@ -4,7 +4,10 @@
 # Larger drafter for higher quality drafts (fewer rejections).
 # Use when quality matters more than drafter speed.
 
-ar_model = "granite"
+ar_model = "granite4"
+
+# NOTE: Token IDs are 1-based in Julia. If you copy IDs from HF config.json, add +1.
+# If you want a dedicated [MASK] outside the base vocab, set mask_token_id = vocab_size + 1.
 
 # =============================================================================
 # Architecture (Larger)

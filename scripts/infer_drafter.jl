@@ -65,6 +65,14 @@ function parse_commandline()
             help = "AR model for TiDAR mode (HuggingFace model name)"
             arg_type = String
             default = "ibm-granite/granite-4.0-micro"
+        "--add-bos-to-verifier"
+            help = "Prepend BOS token to verifier input for alignment"
+            arg_type = Bool
+            default = true
+        "--bos-token-id"
+            help = "BOS token ID (1-based)"
+            arg_type = Int
+            default = 1
     end
 
     return parse_args(s)
@@ -206,22 +214,6 @@ end
 # =============================================================================
 
 """
-    rejection_sample(draft_token, draft_prob, ar_prob; rng=Random.default_rng())
-
-Perform rejection sampling for a single token.
-Accept with probability min(1, ar_prob / draft_prob).
-"""
-function rejection_sample(
-    draft_token::Int,
-    draft_prob::Float32,
-    ar_prob::Float32;
-    rng = Random.default_rng()
-)
-    acceptance_prob = min(1.0f0, ar_prob / (draft_prob + 1f-10))
-    return rand(rng) < acceptance_prob
-end
-
-"""
     generate_tidar(drafter, drafter_params, drafter_state,
                    ar_model, ar_tokenizer,
                    prompt_ids, max_new_tokens; kwargs...)
@@ -240,8 +232,10 @@ function generate_tidar(
     draft_length::Int = 8,
     temperature::Float64 = 1.0,
     top_p::Float64 = 0.9,
+    add_bos_to_verifier::Bool = true,
+    bos_token_id::Int = 1,
     rng = Random.default_rng(),
-    ar_forward_fn = nothing  # Function: (token_ids) -> logits
+    ar_forward_fn = nothing  # Function: (token_ids[, state]) -> logits or (logits, state)
 )
     if ar_forward_fn === nothing
         @warn "No AR model provided. Falling back to draft-only mode."
@@ -258,6 +252,8 @@ function generate_tidar(
     total_accepted = 0
     steps = 0
 
+    ar_state = nothing
+
     while tokens_generated < max_new_tokens
         steps += 1
         current_len = length(generated)
@@ -271,48 +267,54 @@ function generate_tidar(
         # Sample from drafter
         draft_start = current_len + 1
         draft_end = current_len + tokens_to_draft
-        draft_probs = NNlib.softmax(draft_logits[:, draft_start:draft_end] ./ Float32(temperature), dims=1)
+        draft_logits_slice = draft_logits[:, draft_start:draft_end]
 
         drafted_tokens = Int[]
-        drafted_probs = Float32[]
         for i in 1:tokens_to_draft
             token = sample_from_logits(draft_logits[:, draft_start + i - 1];
                 temperature, top_p, rng)
             push!(drafted_tokens, token)
-            push!(drafted_probs, draft_probs[token, i])
         end
 
         total_drafted += tokens_to_draft
 
         # === VERIFY PHASE ===
-        # AR model computes probabilities causally
-        verify_input = vcat(generated, drafted_tokens)
-        ar_logits = ar_forward_fn(verify_input)
-        ar_probs = NNlib.softmax(ar_logits ./ Float32(temperature), dims=1)
-
-        # === REJECTION SAMPLING ===
-        accepted = Int[]
-        for i in 1:tokens_to_draft
-            pos = current_len + i
-            token = drafted_tokens[i]
-            draft_p = drafted_probs[i]
-            ar_p = ar_probs[token, pos]
-
-            if rejection_sample(token, draft_p, ar_p; rng)
-                push!(accepted, token)
-            else
-                # Rejection: resample from AR and stop
-                resampled = sample_from_logits(ar_logits[:, pos];
-                    temperature, top_p, rng)
-                push!(accepted, resampled)
-                break
-            end
+        # AR model computes logits causally
+        verify_input = add_bos_to_verifier ? vcat(bos_token_id, generated, drafted_tokens) : vcat(generated, drafted_tokens)
+        ar_out = if applicable(ar_forward_fn, verify_input, ar_state)
+            ar_forward_fn(verify_input, ar_state)
+        else
+            ar_forward_fn(verify_input)
         end
+        ar_logits, ar_state = ar_out isa Tuple ? ar_out : (ar_out, ar_state)
+        verifier_offset = add_bos_to_verifier ? 1 : 0
+
+        accepted, _rejection_idx, replacement = verify_and_accept(
+            vcat(generated, drafted_tokens), current_len, ar_logits;
+            draft_logits = draft_logits_slice,
+            temperature = Float32(temperature),
+            mode = :rejection,
+            top_p = Float32(top_p),
+            verifier_offset = verifier_offset,
+            rng = rng
+        )
+
+        total_accepted += accepted
 
         # Accept tokens
-        append!(generated, accepted)
-        tokens_generated += length(accepted)
-        total_accepted += length(accepted)
+        if accepted == tokens_to_draft
+            append!(generated, drafted_tokens)
+            tokens_generated += tokens_to_draft
+        else
+            if accepted > 0
+                append!(generated, drafted_tokens[1:accepted])
+            end
+            if replacement === nothing
+                replacement = argmax(ar_logits[:, current_len + accepted + verifier_offset])
+            end
+            push!(generated, replacement)
+            tokens_generated += accepted + 1
+        end
     end
 
     acceptance_rate = total_accepted / max(total_drafted, 1)

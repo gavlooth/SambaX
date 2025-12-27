@@ -195,7 +195,7 @@ struct OssammaBlock{OSC <: Lux.AbstractLuxLayer} <: LuxLayer
     state_dimension::Int
     dropout_rate::Float32
     use_ffn::Bool
-    use_glu_output_projection::Bool    # Ablation: add d→d Dense after GLU gating
+    use_glu_output_projection::Bool    # Optional d→d Dense after GLU (disabled by default)
     use_parallel_scan::Bool            # GPU optimization: parallel associative scan
 
     # Time-conditioned normalization
@@ -235,7 +235,7 @@ function OssammaBlock(
     dropout_rate::Float32 = 0.1f0,
     use_ffn::Bool = true,
     ffn_expansion::Float32 = 3f0 / 2f0,
-    use_glu_output_projection::Bool = false,  # Ablation: d→d Dense after GLU
+    use_glu_output_projection::Bool = false,  # Optional d→d Dense after GLU
     use_parallel_scan::Bool = false,          # GPU optimization
     parallel_chunk_size::Int = 64,
 )
@@ -554,7 +554,42 @@ include("DrafterTraining.jl")
 using .DrafterTraining: drafter_mlm_loss, distillation_loss, combined_drafter_loss
 using .DrafterTraining: save_drafter_checkpoint, load_drafter_checkpoint
 using .DrafterTraining: DrafterTrainingConfig, create_drafter_training_state
-using .DrafterTraining: apply_random_mask, apply_block_mask
+using .DrafterTraining: apply_random_mask, apply_block_mask, apply_suffix_mask
+
+# ============================================================================
+# Deep Scaling Strategies (48-96+ layers)
+# ============================================================================
+include("DeepScaling.jl")
+using .DeepScaling: HierarchicalFrequencyConfig, compute_layer_frequencies, frequency_summary
+using .DeepScaling: LayerScaleConfig, apply_layer_scale, init_layer_scale
+using .DeepScaling: StochasticDepthConfig, should_drop_layer, layer_drop_rate, drop_path
+using .DeepScaling: CheckpointConfig, should_checkpoint
+using .DeepScaling: OssammaBlockDeep
+using .DeepScaling: DeepModelConfig, create_deep_blocks, print_model_summary
+using .DeepScaling: deep_48L_config, ultra_96L_config, long_context_config
+using .DeepScaling: BlockTypeSchedule, UNIFORM, PROGRESSIVE, SANDWICH, ALTERNATING, get_block_type
+
+# ============================================================================
+# TiDAR - Speculative Decoding with Granite Models
+# ============================================================================
+include("TiDAR.jl")
+using .TiDAR: OssammaDrafterDeep, OssammaDrafterBlockDeep
+using .TiDAR: TiDARConfig
+using .TiDAR: granite_2b_drafter_config, granite_3b_drafter_config, granite_4_3b_drafter_config, granite_8b_drafter_config
+using .TiDAR: granite_drafter_deep_config, granite_3b_drafter_deep_config
+using .TiDAR: GRANITE_VOCAB_SIZE, GRANITE_MASK_TOKEN_ID
+using .TiDAR: GRANITE_3B_VOCAB_SIZE, GRANITE_3B_MASK_TOKEN_ID  # Legacy
+using .TiDAR: draft_tokens, verify_and_accept, tidar_generate_step, tidar_generate_step_cached
+using .TiDAR: estimate_drafter_params, print_tidar_config
+
+# ============================================================================
+# Logic-Gated Routing (MoE scaffolding)
+# ============================================================================
+include("LogicGated.jl")
+using .LogicGated: TokenRouter, top1_expert, build_spans
+using .LogicGated: heuristic_labels, heuristic_labels_batch
+using .LogicGated: router_supervision_loss, router_accuracy
+using .LogicGated: EXPERT_LOGIC, EXPERT_LANGUAGE, EXPERT_MATH, EXPERT_MEMORY, EXPERT_NAMES
 
 # ============================================================================
 # HuggingFace Tokenizer (optional - requires PyCall)
@@ -638,9 +673,38 @@ export DrafterTraining, HFTokenizer
 export drafter_mlm_loss, distillation_loss, combined_drafter_loss
 export save_drafter_checkpoint, load_drafter_checkpoint
 export DrafterTrainingConfig, create_drafter_training_state
-export apply_random_mask, apply_block_mask
+export apply_random_mask, apply_block_mask, apply_suffix_mask
 
 # CRF utilities
 export is_valid_transition, build_transition_mask
+
+# Deep Scaling (48-96+ layers)
+export DeepScaling
+export HierarchicalFrequencyConfig, compute_layer_frequencies, frequency_summary
+export LayerScaleConfig, apply_layer_scale, init_layer_scale
+export StochasticDepthConfig, should_drop_layer, layer_drop_rate, drop_path
+export CheckpointConfig, should_checkpoint
+export OssammaBlockDeep
+export DeepModelConfig, create_deep_blocks, print_model_summary
+export deep_48L_config, ultra_96L_config, long_context_config
+export BlockTypeSchedule, UNIFORM, PROGRESSIVE, SANDWICH, ALTERNATING, get_block_type
+
+# TiDAR (Speculative Decoding with Granite Models)
+export TiDAR
+export OssammaDrafterDeep, OssammaDrafterBlockDeep
+export TiDARConfig
+export granite_2b_drafter_config, granite_3b_drafter_config, granite_4_3b_drafter_config, granite_8b_drafter_config
+export granite_drafter_deep_config, granite_3b_drafter_deep_config
+export GRANITE_VOCAB_SIZE, GRANITE_MASK_TOKEN_ID
+export GRANITE_3B_VOCAB_SIZE, GRANITE_3B_MASK_TOKEN_ID  # Legacy
+export draft_tokens, verify_and_accept, tidar_generate_step, tidar_generate_step_cached
+export estimate_drafter_params, print_tidar_config
+
+# Logic-gated routing exports
+export LogicGated
+export TokenRouter, top1_expert, build_spans
+export heuristic_labels, heuristic_labels_batch
+export router_supervision_loss, router_accuracy
+export EXPERT_LOGIC, EXPERT_LANGUAGE, EXPERT_MATH, EXPERT_MEMORY, EXPERT_NAMES
 
 end
