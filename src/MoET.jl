@@ -156,7 +156,14 @@ function (tower::ExpertTower)(inputs::Tuple, params, state)
         new_states[i] = new_block_state
     end
 
-    hidden, norm_state = tower.FinalNorm(hidden, params.FinalNorm, state.FinalNorm)
+    if ndims(hidden) == 3
+        d, seq, batch = size(hidden)
+        hidden_flat = reshape(hidden, d, :)
+        normed_flat, norm_state = tower.FinalNorm(hidden_flat, params.FinalNorm, state.FinalNorm)
+        hidden = reshape(normed_flat, d, seq, batch)
+    else
+        hidden, norm_state = tower.FinalNorm(hidden, params.FinalNorm, state.FinalNorm)
+    end
 
     new_state = (
         Blocks = NamedTuple{ntuple(i -> Symbol("Block_$i"), tower.number_of_layers)}(Tuple(new_states)),
