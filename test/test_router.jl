@@ -111,4 +111,8 @@ end
     x = randn(Float32, d, seq, batch)
     y, _ = layer(x, ps, st)
     @test size(y) == size(x)
+
+    y2, gates, _ = layer(x, ps, st; return_gates = true)
+    @test size(y2) == size(x)
+    @test size(gates) == (2, seq, batch)
 end
