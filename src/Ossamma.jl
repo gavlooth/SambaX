@@ -215,7 +215,7 @@ struct OssammaBlock{OSC <: Lux.AbstractLuxLayer} <: LuxLayer
     AlphaProjection::Lux.Dense         # dim → 1
 
     # Dropout after mixing
-    AttentionDropout::Lux.Dropout
+    AttentionDropout::LuxLayer
 
     # SwiGLU FFN (expressiveness) + Output normalization
     FFN::Union{SwiGLU, Nothing}

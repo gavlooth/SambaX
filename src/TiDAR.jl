@@ -114,7 +114,7 @@ struct OssammaDrafterBlockDeep <: LuxCore.AbstractLuxLayer
     GluProjection::Lux.Dense
     LinearAttention::LinearAttentionLayer
     OscillatorLayer::DLinOSSParallel  # Always parallel for TiDAR
-    Dropout::Lux.Dropout
+    Dropout::LuxCore.AbstractLuxLayer
     FFN::Union{SwiGLU, Nothing}
     OutputNorm::Lux.LayerNorm
 end

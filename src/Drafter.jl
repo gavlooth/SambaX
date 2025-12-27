@@ -68,7 +68,7 @@ struct OssammaDrafterBlock <: LuxCore.AbstractLuxLayer
     GluProjection::Lux.Dense           # d → 2d
     LinearAttention::LinearAttentionLayer
     OscillatorLayer::Union{DLinOSS, DLinOSSParallel}
-    Dropout::Lux.Dropout
+    Dropout::LuxCore.AbstractLuxLayer
     FFN::Union{SwiGLU, Nothing}
     OutputNorm::Lux.LayerNorm
 end
