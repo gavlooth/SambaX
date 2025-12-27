@@ -358,7 +358,14 @@ function (model::MoETModel)(
         )
     end
 
-    hidden, norm_state = model.FinalNorm(hidden, params.FinalNorm, state.FinalNorm)
+    if ndims(hidden) == 3
+        d, seq, batch = size(hidden)
+        hidden_flat = reshape(hidden, d, :)
+        normed_flat, norm_state = model.FinalNorm(hidden_flat, params.FinalNorm, state.FinalNorm)
+        hidden = reshape(normed_flat, d, seq, batch)
+    else
+        hidden, norm_state = model.FinalNorm(hidden, params.FinalNorm, state.FinalNorm)
+    end
     logits, head_state = model.OutputHead(hidden, params.OutputHead, state.OutputHead)
 
     new_state = (
