@@ -132,11 +132,18 @@ function Lux.initialstates(rng::Random.AbstractRNG, layer::GatedExperts)
 end
 
 """
-    (layer::GatedExperts)(inputs, params, state; logic_mask=nothing, temperature=1.0)
+    (layer::GatedExperts)(inputs, params, state; logic_mask=nothing, temperature=1.0, return_gates=false)
 
 Routes inputs through all experts and fuses outputs with gates.
 """
-function (layer::GatedExperts)(inputs, params, state; logic_mask=nothing, temperature::Float32 = 1.0f0)
+function (layer::GatedExperts)(
+    inputs,
+    params,
+    state;
+    logic_mask = nothing,
+    temperature::Float32 = 1.0f0,
+    return_gates::Bool = false
+)
     x = inputs isa Tuple ? inputs[1] : inputs
 
     gates, router_state = layer.Router(x, params.Router, state.Router; temperature = temperature)
@@ -178,7 +185,7 @@ function (layer::GatedExperts)(inputs, params, state; logic_mask=nothing, temper
 
     fused = fuse_experts_gated_sum(expert_outputs, gates)
     new_state = (Router = router_state, Experts = new_states)
-    return fused, new_state
+    return return_gates ? (fused, gates, new_state) : (fused, new_state)
 end
 
 """
