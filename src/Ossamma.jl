@@ -592,6 +592,12 @@ using .LogicGated: router_supervision_loss, router_accuracy
 using .LogicGated: EXPERT_LOGIC, EXPERT_LANGUAGE, EXPERT_MATH, EXPERT_MEMORY, EXPERT_NAMES
 
 # ============================================================================
+# MoE Transformer (Logic-gated)
+# ============================================================================
+include("MoET.jl")
+using .MoET: MoETConfig, ExpertTower, MoETModel
+
+# ============================================================================
 # HuggingFace Tokenizer (optional - requires PyCall)
 # ============================================================================
 include("HFTokenizer.jl")
@@ -706,5 +712,9 @@ export TokenRouter, top1_expert, build_spans
 export heuristic_labels, heuristic_labels_batch
 export router_supervision_loss, router_accuracy
 export EXPERT_LOGIC, EXPERT_LANGUAGE, EXPERT_MATH, EXPERT_MEMORY, EXPERT_NAMES
+
+# MoE Transformer exports
+export MoET
+export MoETConfig, ExpertTower, MoETModel
 
 end
