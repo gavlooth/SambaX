@@ -168,8 +168,8 @@ function batch_encode(
     input_ids_np = encoding["input_ids"]
     attention_mask_np = encoding["attention_mask"]
 
-    input_ids = Matrix{Int}(input_ids_np) .+ 1  # batch × seq_len
-    attention_mask = Matrix{Bool}(attention_mask_np)  # batch × seq_len
+    input_ids = Array{Int}(input_ids_np) .+ 1  # batch × seq_len
+    attention_mask = Array{Bool}(attention_mask_np)  # batch × seq_len
 
     # Transpose to (seq_len, batch) convention
     return (
