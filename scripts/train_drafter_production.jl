@@ -582,26 +582,49 @@ function main()
     teacher_model = isempty(args["teacher-model"]) ? verifier_model : args["teacher-model"]
 
     if args["download-verifier"]
-        println("\nDownloading verifier model: $verifier_model")
-        try
-            path = ensure_hf_snapshot(verifier_model; cache_dir = args["hf-cache-dir"])
-            println("  Verifier cached at: $path")
-        catch e
-            println("  Failed to download verifier: $e")
-            println("  Install huggingface_hub in your Python environment.")
+        if ispath(verifier_model)
+            println("\nVerifier model is a local path, skipping download: $verifier_model")
+        else
+            println("\nDownloading verifier model: $verifier_model")
+            try
+                path = ensure_hf_snapshot(verifier_model; cache_dir = args["hf-cache-dir"])
+                println("  Verifier cached at: $path")
+            catch e
+                println("  Failed to download verifier: $e")
+                println("  Install huggingface_hub in your Python environment.")
+            end
         end
     end
 
     println("\nLoading tokenizer: $tokenizer_model")
     tokenizer = load_tokenizer(tokenizer_model)
 
-    if model_config.vocab_size != get_vocab_size(tokenizer)
-        println("  WARNING: tokenizer vocab_size=$(get_vocab_size(tokenizer)) differs from model_config.vocab_size=$(model_config.vocab_size)")
+    tok_vocab_size = get_vocab_size(tokenizer)
+    tok_mask_id = get_mask_token_id(tokenizer)
+    if model_config.vocab_size != tok_vocab_size
+        println("  WARNING: tokenizer vocab_size=$(tok_vocab_size) differs from model_config.vocab_size=$(model_config.vocab_size)")
     end
 
-    mask_token_id = model_config.mask_token_id
-    if mask_token_id == 0
-        mask_token_id = get_mask_token_id(tokenizer)
+    mask_token_id = model_config.mask_token_id == 0 ? tok_mask_id : model_config.mask_token_id
+    if tok_vocab_size > model_config.vocab_size || tok_mask_id > model_config.vocab_size
+        new_vocab = max(tok_vocab_size, mask_token_id, tok_mask_id)
+        new_mask = max(mask_token_id, tok_mask_id)
+        println("  Updating model vocab_size to $(new_vocab) and mask_token_id to $(new_mask)")
+        model_config = DrafterConfig(
+            ar_model = model_config.ar_model,
+            vocab_size = new_vocab,
+            mask_token_id = new_mask,
+            max_sequence_length = model_config.max_sequence_length,
+            embedding_dimension = model_config.embedding_dimension,
+            number_of_heads = model_config.number_of_heads,
+            number_of_layers = model_config.number_of_layers,
+            time_dimension = model_config.time_dimension,
+            dropout_rate = model_config.dropout_rate,
+            use_ffn = model_config.use_ffn,
+            ffn_expansion = model_config.ffn_expansion,
+            use_parallel_scan = model_config.use_parallel_scan,
+        )
+        mask_token_id = model_config.mask_token_id
     end
 
     println("\nCreating model...")
