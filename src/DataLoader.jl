@@ -244,7 +244,10 @@ function download_hf_dataset(
         # Extract rows
         if haskey(result, :rows)
             rows = result[:rows]
-            data = [Dict{String, Any}(row[:row]) for row in rows]
+            data = [
+                Dict{String, Any}(string(k) => v for (k, v) in pairs(row[:row]))
+                for row in rows
+            ]
 
             # Cache the result
             open(cache_file, "w") do f
