@@ -763,11 +763,12 @@ function (model::OssammaDrafter)(token_ids, t, params, state)
     # =========================================================================
     # 5. Apply DrafterBlocks
     # =========================================================================
-    block_states = []
-    for (i, block) in enumerate(model.Blocks)
-        # Pass sinusoidal_emb (time_dim, batch) to blocks, not the MLP-projected one
-        hidden, blk_state = block((hidden, sinusoidal_emb), params.Blocks[i], state.Blocks[i])
-        push!(block_states, blk_state)
+    (hidden, block_states) = foldl(
+        enumerate(model.Blocks);
+        init = (hidden, ())
+    ) do (h, states), (i, block)
+        new_h, blk_state = block((h, sinusoidal_emb), params.Blocks[i], state.Blocks[i])
+        (new_h, (states..., blk_state))
     end
 
     # =========================================================================
@@ -797,7 +798,7 @@ function (model::OssammaDrafter)(token_ids, t, params, state)
         TokenEmbedding = tok_state,
         PositionEmbedding = pos_state,
         TimeEmbedding = time_state,
-        Blocks = block_states,
+        Blocks = collect(block_states),
         FinalNorm = norm_state,
         LMHead = lm_state,
     )
