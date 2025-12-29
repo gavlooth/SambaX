@@ -36,6 +36,51 @@ const LuxLayer =
     Lux.AbstractLuxLayer
 
 # ============================================================================
+# RMSNorm (Root Mean Square Layer Normalization)
+# ============================================================================
+"""
+    RMSNorm(dim; eps=1f-6)
+
+Root Mean Square Layer Normalization (Zhang & Sennrich, 2019).
+Simpler than LayerNorm: no mean subtraction, just variance normalization.
+
+    RMSNorm(x) = x / RMS(x) * γ
+    where RMS(x) = √(mean(x²) + ε)
+
+Benefits:
+- Faster than LayerNorm (no mean computation)
+- Works well for stabilizing GLU gating and attention outputs
+- Used in LLaMA, Mistral, and other modern architectures
+"""
+struct RMSNorm <: LuxLayer
+    dim::Int
+    eps::Float32
+end
+
+function RMSNorm(dim::Int; eps::Float32 = 1f-6)
+    return RMSNorm(dim, eps)
+end
+
+function Lux.initialparameters(rng::Random.AbstractRNG, layer::RMSNorm)
+    return (scale = ones(Float32, layer.dim),)
+end
+
+function Lux.initialstates(rng::Random.AbstractRNG, layer::RMSNorm)
+    return (;)
+end
+
+function (layer::RMSNorm)(x, ps, st)
+    # x: (dim, ...) - normalize over first dimension
+    # Compute RMS = √(mean(x²) + ε)
+    rms = sqrt.(mean(x .^ 2, dims=1) .+ layer.eps)
+    # Normalize and scale
+    x_norm = x ./ rms
+    # Apply learnable scale (broadcast over other dims)
+    output = x_norm .* reshape(ps.scale, :, ntuple(_ -> 1, ndims(x) - 1)...)
+    return output, st
+end
+
+# ============================================================================
 # Time-Conditioned LayerNorm
 # ============================================================================
 struct TimeConditionedLayerNorm <: LuxLayer
@@ -198,6 +243,11 @@ struct OssammaBlock{OSC <: Lux.AbstractLuxLayer} <: LuxLayer
     use_glu_output_projection::Bool    # Optional d→d Dense after GLU (disabled by default)
     use_parallel_scan::Bool            # GPU optimization: parallel associative scan
 
+    # Alpha mixing ablation flags
+    use_vector_gains::Bool             # Learnable per-dim gains s_g, s_l (cheap: 2d params)
+    use_per_head_alpha::Bool           # Per-head α instead of scalar (modest: d*h params)
+    use_branch_projections::Bool       # Full d→d projections per branch (expensive: 2d² params)
+
     # Time-conditioned normalization
     InputNorm::TimeConditionedLayerNorm
 
@@ -207,12 +257,21 @@ struct OssammaBlock{OSC <: Lux.AbstractLuxLayer} <: LuxLayer
     OscillatorLayer::OSC               # DLinOSS or DLinOSSParallel
     GluOutputProjection::Union{Lux.Dense, Nothing}  # Optional d→d (ablation)
 
+    # RMSNorm for GLU branch outputs (stabilizes gating)
+    LinearAttnNorm::RMSNorm            # Normalize linear attention output before GLU
+    OscillatorNorm::RMSNorm            # Normalize oscillator output before GLU
+
     # Local branch: InputGate + Windowed Softmax Attention
     InputGate::Lux.Dense               # dim → dim (no bias, sigmoid activation)
     SlidingWindowAttention::SWAttention
 
     # Mixing: α projection from input
-    AlphaProjection::Lux.Dense         # dim → 1
+    # Output dim depends on use_per_head_alpha: 1 (scalar) or num_heads (per-head)
+    AlphaProjection::Lux.Dense         # dim → 1 or dim → num_heads
+
+    # Branch projections for mixing (optional, expensive)
+    GlobalProjection::Union{Lux.Dense, Nothing}  # d → d (ablation: use_branch_projections)
+    LocalProjection::Union{Lux.Dense, Nothing}   # d → d (ablation: use_branch_projections)
 
     # Dropout after mixing
     AttentionDropout::LuxLayer
@@ -238,6 +297,10 @@ function OssammaBlock(
     use_glu_output_projection::Bool = false,  # Optional d→d Dense after GLU
     use_parallel_scan::Bool = false,          # GPU optimization
     parallel_chunk_size::Int = 64,
+    # Alpha mixing ablation options
+    use_vector_gains::Bool = false,           # Learnable per-dim gains s_g, s_l (+2d params)
+    use_per_head_alpha::Bool = false,         # Per-head α instead of scalar (+d*h params)
+    use_branch_projections::Bool = false,     # Full d→d per-branch projections (+2d² params)
 )
     # Choose oscillator implementation based on parallelization setting
     oscillator_layer = if use_parallel_scan
@@ -251,6 +314,9 @@ function OssammaBlock(
                 min_frequency, max_frequency, default_time_step)
     end
 
+    # Alpha projection output dim: 1 (scalar) or num_heads (per-head)
+    alpha_out_dim = use_per_head_alpha ? number_of_heads : 1
+
     return OssammaBlock(
         embedding_dimension,
         sequence_length,
@@ -261,6 +327,10 @@ function OssammaBlock(
         use_ffn,
         use_glu_output_projection,
         use_parallel_scan,
+        # Alpha mixing ablation flags
+        use_vector_gains,
+        use_per_head_alpha,
+        use_branch_projections,
         # Time-conditioned LayerNorm
         TimeConditionedLayerNorm(embedding_dimension, time_dimension),
         # GLU branch
@@ -268,11 +338,17 @@ function OssammaBlock(
         LinearAttentionLayer(embedding_dimension, sequence_length, number_of_heads, time_dimension),
         oscillator_layer,
         use_glu_output_projection ? Lux.Dense(embedding_dimension => embedding_dimension) : nothing,
+        # RMSNorm for GLU branch outputs (stabilizes gating)
+        RMSNorm(embedding_dimension),   # LinearAttnNorm
+        RMSNorm(embedding_dimension),   # OscillatorNorm
         # Local branch: InputGate + SlidingWindowAttention
         Lux.Dense(embedding_dimension => embedding_dimension; use_bias = false),
         SWAttention(sequence_length, embedding_dimension, number_of_heads; window_size = window_size),
-        # Alpha mixing projection
-        Lux.Dense(embedding_dimension => 1),
+        # Alpha mixing projection: dim → 1 (scalar α) or dim → num_heads (per-head α)
+        Lux.Dense(embedding_dimension => alpha_out_dim),
+        # Branch projections (optional, expensive d→d)
+        use_branch_projections ? Lux.Dense(embedding_dimension => embedding_dimension) : nothing,
+        use_branch_projections ? Lux.Dense(embedding_dimension => embedding_dimension) : nothing,
         # Dropout after mixing
         Lux.Dropout(dropout_rate),
         # SwiGLU FFN + Output normalization
@@ -300,15 +376,44 @@ function Lux.initialparameters(rng::Random.AbstractRNG, layer::OssammaBlock)
         input_gate_params = (weight = input_gate_params.weight .* 0.02f0,)
     end
 
+    # Vector gains s_g, s_l: initialized to 1.0 (identity scaling)
+    vector_gains = if layer.use_vector_gains
+        (
+            GlobalGain = ones(Float32, layer.embedding_dimension),
+            LocalGain = ones(Float32, layer.embedding_dimension),
+        )
+    else
+        (GlobalGain = nothing, LocalGain = nothing)
+    end
+
+    # Branch projections (expensive d→d)
+    global_proj_params = if layer.use_branch_projections && layer.GlobalProjection !== nothing
+        Lux.initialparameters(rng, layer.GlobalProjection)
+    else
+        NamedTuple()
+    end
+
+    local_proj_params = if layer.use_branch_projections && layer.LocalProjection !== nothing
+        Lux.initialparameters(rng, layer.LocalProjection)
+    else
+        NamedTuple()
+    end
+
     return (
         InputNorm = Lux.initialparameters(rng, layer.InputNorm),
         GluProjection = Lux.initialparameters(rng, layer.GluProjection),
         LinearAttention = Lux.initialparameters(rng, layer.LinearAttention),
         OscillatorLayer = Lux.initialparameters(rng, layer.OscillatorLayer),
         GluOutputProjection = glu_out_params,
+        LinearAttnNorm = Lux.initialparameters(rng, layer.LinearAttnNorm),
+        OscillatorNorm = Lux.initialparameters(rng, layer.OscillatorNorm),
         InputGate = input_gate_params,
         SlidingWindowAttention = Lux.initialparameters(rng, layer.SlidingWindowAttention),
         AlphaProjection = Lux.initialparameters(rng, layer.AlphaProjection),
+        GlobalGain = vector_gains.GlobalGain,
+        LocalGain = vector_gains.LocalGain,
+        GlobalProjection = global_proj_params,
+        LocalProjection = local_proj_params,
         AttentionDropout = Lux.initialparameters(rng, layer.AttentionDropout),
         FFN = ffn_params,
         OutputNorm = Lux.initialparameters(rng, layer.OutputNorm),
@@ -328,15 +433,32 @@ function Lux.initialstates(rng::Random.AbstractRNG, layer::OssammaBlock)
         NamedTuple()
     end
 
+    # Branch projection states (expensive d→d)
+    global_proj_state = if layer.use_branch_projections && layer.GlobalProjection !== nothing
+        Lux.initialstates(rng, layer.GlobalProjection)
+    else
+        NamedTuple()
+    end
+
+    local_proj_state = if layer.use_branch_projections && layer.LocalProjection !== nothing
+        Lux.initialstates(rng, layer.LocalProjection)
+    else
+        NamedTuple()
+    end
+
     return (
         InputNorm = Lux.initialstates(rng, layer.InputNorm),
         GluProjection = Lux.initialstates(rng, layer.GluProjection),
         LinearAttention = Lux.initialstates(rng, layer.LinearAttention),
         OscillatorLayer = Lux.initialstates(rng, layer.OscillatorLayer),
         GluOutputProjection = glu_out_state,
+        LinearAttnNorm = Lux.initialstates(rng, layer.LinearAttnNorm),
+        OscillatorNorm = Lux.initialstates(rng, layer.OscillatorNorm),
         InputGate = Lux.initialstates(rng, layer.InputGate),
         SlidingWindowAttention = Lux.initialstates(rng, layer.SlidingWindowAttention),
         AlphaProjection = Lux.initialstates(rng, layer.AlphaProjection),
+        GlobalProjection = global_proj_state,
+        LocalProjection = local_proj_state,
         AttentionDropout = Lux.initialstates(rng, layer.AttentionDropout),
         FFN = ffn_state,
         OutputNorm = Lux.initialstates(rng, layer.OutputNorm),
@@ -370,18 +492,24 @@ function (block::OssammaBlock)(inputs::Tuple, params, state)
     content_half = copy(selectdim(glu_projected, 1, 1:dim))
     gate_half = copy(selectdim(glu_projected, 1, (dim+1):size(glu_projected, 1)))
 
-    # Content → Linear Attention
+    # Content → Linear Attention → RMSNorm (stabilize before gating)
     content_output, lin_attn_state = block.LinearAttention(
         (content_half, time_input), params.LinearAttention, state.LinearAttention
     )
+    content_output, lin_attn_norm_state = block.LinearAttnNorm(
+        content_output, params.LinearAttnNorm, state.LinearAttnNorm
+    )
 
-    # Gate → Oscillator SSM → sigmoid
+    # Gate → Oscillator SSM → RMSNorm → sigmoid (stabilize before gating)
     gate_output, osc_state = block.OscillatorLayer(
         gate_half, params.OscillatorLayer, state.OscillatorLayer
     )
+    gate_output, osc_norm_state = block.OscillatorNorm(
+        gate_output, params.OscillatorNorm, state.OscillatorNorm
+    )
     gate_activated = NNlib.sigmoid.(gate_output)
 
-    # GLU: content ⊙ gate
+    # GLU: RMSNorm(content) ⊙ sigmoid(RMSNorm(gate))
     glu_output = content_output .* gate_activated
 
     # Optional: d→d projection after GLU (ablation experiment)
@@ -409,31 +537,110 @@ function (block::OssammaBlock)(inputs::Tuple, params, state)
     )
 
     # =========================================================================
-    # 4. Adaptive Mixing: α·GLU + (1-α)·Local
+    # 4. Adaptive Mixing: α·GLU + (1-α)·Local (Token-wise mixing)
     # =========================================================================
-    # Compute α from input (mean-pooled over sequence)
+    # Compute α_t per token: α_t = σ(Wα · h_t + bα)
+    # where h_t = normalized token at position t
     is_batched = ndims(input_tensor) == 3
-    seq_dim = 2
 
-    # Mean pool over sequence dimension
-    input_pooled = dropdims(mean(normalized, dims = seq_dim), dims = seq_dim)
-
-    alpha_logits, alpha_state = block.AlphaProjection(
-        input_pooled, params.AlphaProjection, state.AlphaProjection
-    )
-
-    # Add time-conditioned bias and apply sigmoid
-    alpha = NNlib.sigmoid.(alpha_logits .+ alpha_bias)
-
-    # Broadcast alpha for mixing: (1, batch) → (1, 1, batch)
-    if is_batched
-        alpha_broadcast = reshape(alpha, 1, 1, size(alpha, 2))
+    # -------------------------------------------------------------------------
+    # 4a. Optional branch projections (expensive d→d transforms)
+    # -------------------------------------------------------------------------
+    global_branch, global_proj_state = if block.use_branch_projections && block.GlobalProjection !== nothing
+        glu_flat = reshape(glu_output, dim, :)
+        proj_out, proj_st = block.GlobalProjection(glu_flat, params.GlobalProjection, state.GlobalProjection)
+        reshape(proj_out, size(glu_output)), proj_st
     else
-        alpha_broadcast = reshape(alpha, 1, 1)
+        glu_output, NamedTuple()
     end
 
-    # Mix outputs
-    mixed_output = alpha_broadcast .* glu_output .+ (1.0f0 .- alpha_broadcast) .* local_output
+    local_branch, local_proj_state = if block.use_branch_projections && block.LocalProjection !== nothing
+        local_flat = reshape(local_output, dim, :)
+        proj_out, proj_st = block.LocalProjection(local_flat, params.LocalProjection, state.LocalProjection)
+        reshape(proj_out, size(local_output)), proj_st
+    else
+        local_output, NamedTuple()
+    end
+
+    # -------------------------------------------------------------------------
+    # 4b. Optional vector gains s_g, s_l (cheap per-dim scaling)
+    # -------------------------------------------------------------------------
+    if block.use_vector_gains && params.GlobalGain !== nothing && params.LocalGain !== nothing
+        # Reshape gains for broadcasting: (dim,) → (dim, 1, 1) or (dim, 1)
+        if is_batched
+            s_g = reshape(params.GlobalGain, dim, 1, 1)
+            s_l = reshape(params.LocalGain, dim, 1, 1)
+        else
+            s_g = reshape(params.GlobalGain, dim, 1)
+            s_l = reshape(params.LocalGain, dim, 1)
+        end
+        global_branch = global_branch .* s_g
+        local_branch = local_branch .* s_l
+    end
+
+    # -------------------------------------------------------------------------
+    # 4c. Alpha projection: scalar (dim→1) or per-head (dim→num_heads)
+    # -------------------------------------------------------------------------
+    original_size = size(normalized)
+    normalized_flat = reshape(normalized, dim, :)  # (dim, seq*batch)
+
+    alpha_logits_flat, alpha_state = block.AlphaProjection(
+        normalized_flat, params.AlphaProjection, state.AlphaProjection
+    )
+
+    # Reshape and compute alpha based on mode
+    if block.use_per_head_alpha
+        # Per-head alpha: output is (num_heads, seq*batch)
+        num_heads = block.number_of_heads
+        head_dim = dim ÷ num_heads
+
+        if is_batched
+            seq_len, batch_size = original_size[2], original_size[3]
+            # Alpha shape: (num_heads, seq, batch) → (1, num_heads, seq, batch) for broadcast
+            alpha_logits = reshape(alpha_logits_flat, num_heads, seq_len, batch_size)
+            alpha_bias_broadcast = reshape(alpha_bias, 1, 1, batch_size)  # time bias still scalar
+            alpha = NNlib.sigmoid.(alpha_logits .+ alpha_bias_broadcast)
+            # Reshape for mixing: (1, num_heads, seq, batch)
+            alpha = reshape(alpha, 1, num_heads, seq_len, batch_size)
+
+            # Reshape branches: (dim, seq, batch) → (head_dim, num_heads, seq, batch)
+            global_branch = reshape(global_branch, head_dim, num_heads, seq_len, batch_size)
+            local_branch = reshape(local_branch, head_dim, num_heads, seq_len, batch_size)
+
+            # Mix per head
+            mixed_output = alpha .* global_branch .+ (1.0f0 .- alpha) .* local_branch
+
+            # Reshape back: (head_dim, num_heads, seq, batch) → (dim, seq, batch)
+            mixed_output = reshape(mixed_output, dim, seq_len, batch_size)
+        else
+            seq_len = original_size[2]
+            alpha_logits = reshape(alpha_logits_flat, num_heads, seq_len)
+            alpha_bias_broadcast = reshape(alpha_bias, 1, 1)
+            alpha = NNlib.sigmoid.(alpha_logits .+ alpha_bias_broadcast)
+            alpha = reshape(alpha, 1, num_heads, seq_len)
+
+            global_branch = reshape(global_branch, head_dim, num_heads, seq_len)
+            local_branch = reshape(local_branch, head_dim, num_heads, seq_len)
+
+            mixed_output = alpha .* global_branch .+ (1.0f0 .- alpha) .* local_branch
+            mixed_output = reshape(mixed_output, dim, seq_len)
+        end
+    else
+        # Scalar alpha: output is (1, seq*batch)
+        if is_batched
+            alpha_logits = reshape(alpha_logits_flat, 1, original_size[2], original_size[3])
+            alpha_bias_broadcast = reshape(alpha_bias, 1, 1, size(alpha_bias, 2))
+        else
+            alpha_logits = reshape(alpha_logits_flat, 1, original_size[2])
+            alpha_bias_broadcast = reshape(alpha_bias, 1, 1)
+        end
+
+        # Add time-conditioned bias and apply sigmoid (token-wise)
+        alpha = NNlib.sigmoid.(alpha_logits .+ alpha_bias_broadcast)
+
+        # Mix outputs: α_t·GLU_t + (1-α_t)·Local_t
+        mixed_output = alpha .* global_branch .+ (1.0f0 .- alpha) .* local_branch
+    end
 
     # =========================================================================
     # 5. Dropout
@@ -471,9 +678,13 @@ function (block::OssammaBlock)(inputs::Tuple, params, state)
         LinearAttention = lin_attn_state,
         OscillatorLayer = osc_state,
         GluOutputProjection = glu_out_state,
+        LinearAttnNorm = lin_attn_norm_state,
+        OscillatorNorm = osc_norm_state,
         InputGate = input_gate_state,
         SlidingWindowAttention = sw_attn_state,
         AlphaProjection = alpha_state,
+        GlobalProjection = global_proj_state,
+        LocalProjection = local_proj_state,
         AttentionDropout = attn_dropout_state,
         FFN = ffn_state,
         OutputNorm = output_norm_state,
@@ -632,7 +843,7 @@ export CRF, NERDataset, Tokenizer, Augmentation, NERMetrics
 export Monitoring, InferenceServer
 
 # Main block
-export OssammaBlock, OssammaNERBlock, TimeConditionedLayerNorm
+export OssammaBlock, OssammaNERBlock, TimeConditionedLayerNorm, RMSNorm
 
 # LLaDA model and utilities
 export LLaDAModel, TimeMLPEmbedding, SinusoidalTimeEmbedding

@@ -51,6 +51,11 @@ use_output_gate = false           # Output gate removed (redundant with α-mixin
 use_ffn = true                    # SwiGLU FFN after α-mixing (Option E)
 ffn_expansion = 1.333333          # 4/3 expansion factor (power-of-2 split dim)
 
+# Alpha mixing ablation options (all disabled by default)
+use_vector_gains = false          # Learnable per-dim gains s_g, s_l (+2d params/layer = 12.8K total)
+use_per_head_alpha = false        # Per-head α instead of scalar (+d*h params/layer = 57.7K total)
+use_branch_projections = false    # Full d→d projections per branch (+2d² params/layer = 8.2M total)
+
 [parallelization]
 use_parallel_scan = true          # GPU parallel associative scan (10-40× speedup)
 chunk_size = 64                   # Chunk size for parallel processing

@@ -91,6 +91,11 @@ Base.@kwdef struct NERConfig
     # GPU Parallelization (RTX 5090 optimization)
     use_parallel_scan::Bool = false    # Enable parallel associative scan (10-40× speedup)
     parallel_chunk_size::Int = 64      # Chunk size for parallel scan
+
+    # Alpha mixing ablation options (all disabled by default)
+    use_vector_gains::Bool = false      # Learnable per-dim gains s_g, s_l (+2d params/layer)
+    use_per_head_alpha::Bool = false    # Per-head α instead of scalar (+d*h params/layer)
+    use_branch_projections::Bool = false # Full d→d projections per branch (+2d² params/layer)
 end
 
 # =============================================================================
@@ -151,6 +156,11 @@ function load_ner_config(path::String)::NERConfig
         # GPU Parallelization
         use_parallel_scan = get(parallel, "use_parallel_scan", false),
         parallel_chunk_size = get(parallel, "chunk_size", 64),
+
+        # Alpha mixing ablation options (all disabled by default)
+        use_vector_gains = get(ablation, "use_vector_gains", false),
+        use_per_head_alpha = get(ablation, "use_per_head_alpha", false),
+        use_branch_projections = get(ablation, "use_branch_projections", false),
     )
 end
 
@@ -395,6 +405,10 @@ function OssammaNER(config::NERConfig)
         ffn_expansion = config.ffn_expansion,
         use_parallel_scan = config.use_parallel_scan,      # GPU parallelization
         parallel_chunk_size = config.parallel_chunk_size,
+        # Alpha mixing ablation
+        use_vector_gains = config.use_vector_gains,
+        use_per_head_alpha = config.use_per_head_alpha,
+        use_branch_projections = config.use_branch_projections,
     )
 end
 
@@ -416,6 +430,10 @@ function OssammaNER(;
     ffn_expansion::Float32 = 4f0 / 3f0,  # FFN expansion factor
     use_parallel_scan::Bool = false,     # GPU parallelization (10-40× speedup)
     parallel_chunk_size::Int = 64,       # Chunk size for parallel scan
+    # Alpha mixing ablation options (all disabled by default)
+    use_vector_gains::Bool = false,      # Learnable per-dim gains s_g, s_l (+2d params/layer)
+    use_per_head_alpha::Bool = false,    # Per-head α instead of scalar (+d*h params/layer)
+    use_branch_projections::Bool = false, # Full d→d projections per branch (+2d² params/layer)
 )
     # Build stack of OssammaNERBlocks (with dual gating)
     blocks = Tuple([
@@ -434,6 +452,10 @@ function OssammaNER(;
             ffn_expansion = ffn_expansion,
             use_parallel_scan = use_parallel_scan,
             parallel_chunk_size = parallel_chunk_size,
+            # Alpha mixing ablation
+            use_vector_gains = use_vector_gains,
+            use_per_head_alpha = use_per_head_alpha,
+            use_branch_projections = use_branch_projections,
         )
         for _ in 1:number_of_layers
     ])
