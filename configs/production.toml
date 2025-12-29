@@ -17,7 +17,23 @@ time_dimension = 256        # Rich time/mask-ratio conditioning
 state_dimension = 768       # Match embedding dim for full oscillator expressiveness
 
 [model.attention]
-window_size = 128           # ~12.5% of sequence for local attention patterns
+window_size = 128           # Legacy default (see window_schedule for per-layer plan)
+
+[[model.attention.window_schedule]]
+percent = 0.30
+window_size = 128
+
+[[model.attention.window_schedule]]
+percent = 0.40
+window_size = 160
+
+[[model.attention.window_schedule]]
+percent = 0.20
+window_size = 256
+
+[[model.attention.window_schedule]]
+percent = 0.10
+window_size = 512
 
 # Oscillator SSM Parameters
 # Frequencies represent "cycles per unit time" - log-spaced across oscillators
@@ -26,6 +42,26 @@ window_size = 128           # ~12.5% of sequence for local attention patterns
 min_frequency = 0.01        # Very slow oscillations for long-range dependencies
 max_frequency = 5.0         # Fast oscillations for word-level patterns
 default_time_step = 0.05    # Fine temporal resolution
+
+[[model.oscillator.frequency_schedule]]
+percent = 0.30
+min_frequency = 1.0
+max_frequency = 20.0
+
+[[model.oscillator.frequency_schedule]]
+percent = 0.40
+min_frequency = 0.5
+max_frequency = 12.0
+
+[[model.oscillator.frequency_schedule]]
+percent = 0.20
+min_frequency = 0.2
+max_frequency = 6.0
+
+[[model.oscillator.frequency_schedule]]
+percent = 0.10
+min_frequency = 0.05
+max_frequency = 3.0
 
 # =============================================================================
 # Training Hyperparameters

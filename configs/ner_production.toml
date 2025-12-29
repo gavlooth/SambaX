@@ -17,12 +17,48 @@ time_dimension = 256            # Rich time conditioning
 state_dimension = 1024          # Match embedding dim for full capacity
 
 [model.attention]
-window_size = 64                # Balanced local attention
+window_size = 128               # Legacy default (see window_schedule for per-layer plan)
+
+[[model.attention.window_schedule]]
+percent = 0.30
+window_size = 128
+
+[[model.attention.window_schedule]]
+percent = 0.40
+window_size = 160
+
+[[model.attention.window_schedule]]
+percent = 0.20
+window_size = 256
+
+[[model.attention.window_schedule]]
+percent = 0.10
+window_size = 512
 
 [model.oscillator]
 min_frequency = 0.01            # Very slow oscillations for document-level
 max_frequency = 5.0             # Fast for word-level patterns
 default_time_step = 0.05
+
+[[model.oscillator.frequency_schedule]]
+percent = 0.30
+min_frequency = 1.0
+max_frequency = 20.0
+
+[[model.oscillator.frequency_schedule]]
+percent = 0.40
+min_frequency = 0.5
+max_frequency = 12.0
+
+[[model.oscillator.frequency_schedule]]
+percent = 0.20
+min_frequency = 0.2
+max_frequency = 6.0
+
+[[model.oscillator.frequency_schedule]]
+percent = 0.10
+min_frequency = 0.05
+max_frequency = 3.0
 
 [model.regularization]
 dropout_rate = 0.1
