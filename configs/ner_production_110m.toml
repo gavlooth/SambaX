@@ -17,12 +17,30 @@ time_dimension = 192            # Reduced time conditioning
 state_dimension = 640           # Match embedding dim
 
 [model.attention]
-window_size = 32                # Smaller window for memory
+window_size = 128               # Legacy default (see window_schedule for per-layer plan)
+
+[[model.attention.window_schedule]]
+percent = 0.70
+window_size = 128
+
+[[model.attention.window_schedule]]
+percent = 0.30
+window_size = 256
 
 [model.oscillator]
 min_frequency = 0.01            # Slow oscillations for long-range
 max_frequency = 5.0             # Fast for word-level patterns
 default_time_step = 0.05
+
+[[model.oscillator.frequency_schedule]]
+percent = 0.70
+min_frequency = 1.0
+max_frequency = 20.0
+
+[[model.oscillator.frequency_schedule]]
+percent = 0.30
+min_frequency = 0.2
+max_frequency = 6.0
 
 [model.regularization]
 dropout_rate = 0.1
