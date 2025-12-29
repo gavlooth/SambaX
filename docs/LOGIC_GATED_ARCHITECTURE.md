@@ -1213,6 +1213,34 @@ num_layers = 8
 
 ## TODO: Concrete Fixes for Gating Architecture (Expanded)
 
+### TODO: Global–Local Gated Block Improvements (Requested)
+- [ ] Add explicit residual form: `y = x + α ⊙ g + (1-α) ⊙ l` (do not mix raw outputs without the skip).
+- [ ] Use token-wise mixing (preferred): `α_t = σ(Wα · h_t + bα)` where `h_t` is token hidden state at position `t`.
+- [ ] Define `h_t` clearly and consistently (default): `h_t = RMSNorm(x_t)` (token embedding at position t, normalized).
+  - [ ] Alternative experiment: `h_t = RMSNorm(g_t)` (gate driven by global context).
+  - [ ] Alternative experiment: `h_t = concat(RMSNorm(x_t), RMSNorm(g_t))` (richer gate).
+- [ ] Add branch output projections (separate Dense layers): `g = Wo_g(GlobalAttn(...))`, `l = Wo_l(LocalAttn(...))`.
+- [ ] Normalize branches before mixing: `ĝ = Norm(g)`, `l̂ = Norm(l)` (RMSNorm or LayerNorm).
+- [ ] Prevent α collapse (α → 0 or 1):
+  - [ ] Initialize α near 0.5 (bias init).
+  - [ ] Add small entropy regularization on α.
+  - [ ] Use a mild depth bias schedule (`t_bias`) so early layers don’t collapse.
+- [ ] Stabilize gate signal magnitude: `α_t = σ((Wα · h_t)/√d + bα)` (scale logits).
+- [ ] Reduce global-branch dominance through gate:
+  - [ ] Stop-gradient through gate input for early training (stopgrad(g) into gate only).
+  - [ ] Use a smaller learning rate on gate parameters.
+  - [ ] Gate on normalized features only (`RMSNorm(g_t)`).
+- [ ] Choose scalar vs vector α explicitly:
+  - [ ] Start with scalar α per token (stable).
+  - [ ] Only consider vector α per token if needed, and only with strong normalization.
+- [ ] Ensure local branch capacity is sufficient:
+  - [ ] Verify window size / heads aren’t too small (avoid global dominance).
+  - [ ] Optionally increase window or heads in deeper layers.
+- [ ] Add diagnostics to verify both branches are used:
+  - [ ] Log α distribution (mean, std, histogram).
+  - [ ] Log % tokens with α > 0.8 / < 0.2.
+  - [ ] Log branch norms and gradient norms.
+
 ### Critique / Gaps To Resolve
 - [ ] Granularity mismatch: current router is sequence-level, but inputs are often mixed at token level; fix by moving to token/span gating and keep a small global gate only for load balancing.
 - [ ] Objective mismatch: balance + entropy does not encode "correct expert"; add supervised routing targets and an explicit misroute penalty so gates learn semantics, not just uniformity.
