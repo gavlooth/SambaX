@@ -17,7 +17,9 @@
       "Bash(jj git init:*)",
       "Bash(julia --project=. scripts/train_ner_production.jl:*)",
       "Bash(nvidia-smi:*)",
-      "Bash(git rebase:*)"
+      "Bash(git rebase:*)",
+      "WebFetch(domain:arxiv.org)",
+      "Bash(julia --project=. test:*)"
     ],
     "deny": [],
     "ask": []

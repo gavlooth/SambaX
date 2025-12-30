@@ -31,6 +31,7 @@ import ..DLinOSS
 import ..DLinOSSParallel
 import ..SwiGLU
 import ..SWAttention
+import ..RMSNorm
 
 export HierarchicalFrequencyConfig, compute_layer_frequencies
 export LayerScaleConfig, apply_layer_scale
@@ -384,6 +385,8 @@ struct OssammaBlockDeep <: LuxCore.AbstractLuxLayer
     GluProjection::Union{Lux.Dense, Nothing}
     LinearAttention::Union{LinearAttentionLayer, Nothing}
     OscillatorLayer::Union{DLinOSS, DLinOSSParallel, Nothing}
+    LinearAttnNorm::Union{RMSNorm, Nothing}    # RMSNorm after linear attention
+    OscillatorNorm::Union{RMSNorm, Nothing}    # RMSNorm after oscillator
     InputGate::Union{Lux.Dense, Nothing}
     SlidingWindowAttention::Union{SWAttention, Nothing}
     AlphaProjection::Union{Lux.Dense, Nothing}
@@ -487,6 +490,10 @@ function OssammaBlockDeep(
         Lux.Dense(embedding_dimension => 1) :
         nothing
 
+    # RMSNorm layers for GLU gating (only for global branch)
+    lin_attn_norm = needs_global ? RMSNorm(embedding_dimension) : nothing
+    osc_norm = needs_global ? RMSNorm(embedding_dimension) : nothing
+
     return OssammaBlockDeep(
         embedding_dimension,
         sequence_length,
@@ -510,6 +517,8 @@ function OssammaBlockDeep(
         glu_proj,
         linear_attn,
         oscillator_layer,
+        lin_attn_norm,
+        osc_norm,
         input_gate,
         sw_attn,
         alpha_proj,
@@ -535,6 +544,13 @@ function Lux.initialparameters(rng::Random.AbstractRNG, block::OssammaBlockDeep)
     end
     if block.OscillatorLayer !== nothing
         params[:OscillatorLayer] = Lux.initialparameters(rng, block.OscillatorLayer)
+    end
+    # RMSNorm for GLU gating
+    if block.LinearAttnNorm !== nothing
+        params[:LinearAttnNorm] = Lux.initialparameters(rng, block.LinearAttnNorm)
+    end
+    if block.OscillatorNorm !== nothing
+        params[:OscillatorNorm] = Lux.initialparameters(rng, block.OscillatorNorm)
     end
 
     # Local branch params
@@ -586,6 +602,13 @@ function Lux.initialstates(rng::Random.AbstractRNG, block::OssammaBlockDeep)
     end
     if block.OscillatorLayer !== nothing
         states[:OscillatorLayer] = Lux.initialstates(rng, block.OscillatorLayer)
+    end
+    # RMSNorm for GLU gating
+    if block.LinearAttnNorm !== nothing
+        states[:LinearAttnNorm] = Lux.initialstates(rng, block.LinearAttnNorm)
+    end
+    if block.OscillatorNorm !== nothing
+        states[:OscillatorNorm] = Lux.initialstates(rng, block.OscillatorNorm)
     end
     if block.InputGate !== nothing
         states[:InputGate] = Lux.initialstates(rng, block.InputGate)
@@ -680,17 +703,25 @@ function forward_global_only(block, normalized, time_input, params, state, new_s
     content_half = copy(selectdim(glu_projected, 1, 1:dim))
     gate_half = copy(selectdim(glu_projected, 1, (dim+1):size(glu_projected, 1)))
 
-    # Content → Linear Attention
+    # Content → Linear Attention → RMSNorm
     content_output, lin_attn_state = block.LinearAttention(
         (content_half, time_input), params.LinearAttention, state.LinearAttention
     )
     new_states[:LinearAttention] = lin_attn_state
+    content_output, lin_attn_norm_state = block.LinearAttnNorm(
+        content_output, params.LinearAttnNorm, state.LinearAttnNorm
+    )
+    new_states[:LinearAttnNorm] = lin_attn_norm_state
 
-    # Gate → Oscillator → sigmoid
+    # Gate → Oscillator → RMSNorm → sigmoid
     gate_output, osc_state = block.OscillatorLayer(gate_half, params.OscillatorLayer, state.OscillatorLayer)
     new_states[:OscillatorLayer] = osc_state
+    gate_output, osc_norm_state = block.OscillatorNorm(
+        gate_output, params.OscillatorNorm, state.OscillatorNorm
+    )
+    new_states[:OscillatorNorm] = osc_norm_state
 
-    # GLU gating
+    # GLU gating: RMSNorm(content) ⊙ sigmoid(RMSNorm(gate))
     return content_output .* NNlib.sigmoid.(gate_output)
 end
 
@@ -714,14 +745,25 @@ function forward_full(block, normalized, time_input, alpha_bias, params, state, 
     content_half = copy(selectdim(glu_projected, 1, 1:dim))
     gate_half = copy(selectdim(glu_projected, 1, (dim+1):size(glu_projected, 1)))
 
+    # Content → Linear Attention → RMSNorm
     content_output, lin_attn_state = block.LinearAttention(
         (content_half, time_input), params.LinearAttention, state.LinearAttention
     )
     new_states[:LinearAttention] = lin_attn_state
+    content_output, lin_attn_norm_state = block.LinearAttnNorm(
+        content_output, params.LinearAttnNorm, state.LinearAttnNorm
+    )
+    new_states[:LinearAttnNorm] = lin_attn_norm_state
 
+    # Gate → Oscillator → RMSNorm → sigmoid
     gate_output, osc_state = block.OscillatorLayer(gate_half, params.OscillatorLayer, state.OscillatorLayer)
     new_states[:OscillatorLayer] = osc_state
+    gate_output, osc_norm_state = block.OscillatorNorm(
+        gate_output, params.OscillatorNorm, state.OscillatorNorm
+    )
+    new_states[:OscillatorNorm] = osc_norm_state
 
+    # GLU gating: RMSNorm(content) ⊙ sigmoid(RMSNorm(gate))
     glu_output = content_output .* NNlib.sigmoid.(gate_output)
 
     # Local branch with input gating
@@ -735,22 +777,30 @@ function forward_full(block, normalized, time_input, alpha_bias, params, state, 
     )
     new_states[:SlidingWindowAttention] = sw_state
 
-    # Adaptive mixing
+    # Adaptive mixing (token-wise): α_t = σ(Wα · h_t + bα)
     is_batched = ndims(normalized) == 3
-    input_pooled = dropdims(mean(normalized, dims = 2), dims = 2)
+    original_size = size(normalized)
+    normalized_flat = reshape(normalized, block.embedding_dimension, :)  # (dim, seq*batch)
 
-    alpha_logits, alpha_state = block.AlphaProjection(input_pooled, params.AlphaProjection, state.AlphaProjection)
+    alpha_logits_flat, alpha_state = block.AlphaProjection(
+        normalized_flat, params.AlphaProjection, state.AlphaProjection
+    )
     new_states[:AlphaProjection] = alpha_state
 
-    alpha = NNlib.sigmoid.(alpha_logits .+ alpha_bias)
-
+    # Reshape back to (1, seq, batch) or (1, seq)
     if is_batched
-        alpha_broadcast = reshape(alpha, 1, 1, size(alpha, 2))
+        alpha_logits = reshape(alpha_logits_flat, 1, original_size[2], original_size[3])
+        # Broadcast alpha_bias: (1, batch) → (1, 1, batch)
+        alpha_bias_broadcast = reshape(alpha_bias, 1, 1, size(alpha_bias, 2))
     else
-        alpha_broadcast = reshape(alpha, 1, 1)
+        alpha_logits = reshape(alpha_logits_flat, 1, original_size[2])
+        alpha_bias_broadcast = reshape(alpha_bias, 1, 1)
     end
 
-    return alpha_broadcast .* glu_output .+ (1.0f0 .- alpha_broadcast) .* local_output
+    # Token-wise mixing
+    alpha = NNlib.sigmoid.(alpha_logits .+ alpha_bias_broadcast)
+
+    return alpha .* glu_output .+ (1.0f0 .- alpha) .* local_output
 end
 
 # =============================================================================

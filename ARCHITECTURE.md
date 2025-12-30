@@ -58,59 +58,95 @@ The main model to be trained is **LLaDAModel** - a discrete text diffusion langu
 ### OssammaBlock Detail
 
 ```
-╔═══════════════════════════════════════════════════════════════════════════════════════════╗
-║                                    OssammaBlock                                            ║
-║     Oscillatory State Space Attention Masked Mixer Architecture                           ║
-╠═══════════════════════════════════════════════════════════════════════════════════════════╣
-║                                                                                           ║
-║   Input ────────────────────────────────┬─────────────────────────────── Residual         ║
-║             │                           │                                    │            ║
-║             ▼                           │                                    │            ║
-║   ┌─────────────────────────────┐       │                                    │            ║
-║   │ Time-Conditioned LayerNorm  │◄──time_emb                                 │            ║
-║   │  (scale, shift, α_bias)     │       │                                    │            ║
-║   └─────────────┬───────────────┘       │                                    │            ║
-║                 │                       │                                    │            ║
-║      ┌──────────┴──────────────────────────────────────────┐                 │            ║
-║      │                                                      │                │            ║
-║      ▼                                                      ▼                │            ║
-║ ┌─────────────────────────────────────────────┐    ┌───────────────────┐     │            ║
-║ │      Global-Spectral GLU Branch             │    │ Local-Sharp Branch│     │            ║
-║ │                                             │    │                   │     │            ║
-║ │  Dense(d→2d)                                │    │   SWAttention     │     │            ║
-║ │      │                                      │    │   (Sliding        │     │            ║
-║ │      ├─────────────┬────────────┐           │    │    Window         │     │            ║
-║ │  content_half   gate_half       │           │    │    Softmax)       │     │            ║
-║ │      │              │           │           │    │                   │     │            ║
-║ │      ▼              ▼           │           │    └─────────┬─────────┘     │            ║
-║ │ ┌──────────┐  ┌──────────┐     │           │              │               │            ║
-║ │ │ Linear   │  │ DLinOSS  │     │           │              │               │            ║
-║ │ │ Attention│  │(Oscillator│    │           │              │               │            ║
-║ │ │          │  │   SSM)    │    │           │              │               │            ║
-║ │ └────┬─────┘  └────┬─────┘     │           │              │               │            ║
-║ │      │             │           │           │              │               │            ║
-║ │      │         sigmoid         │           │              │               │            ║
-║ │      │             │           │           │              │               │            ║
-║ │      └──────⊙──────┘  (gate)   │           │              │               │            ║
-║ │             │                  │           │              │               │            ║
-║ │         Dense(d→d)             │           │              │               │            ║
-║ │             │                  │           │              │               │            ║
-║ └─────────────┼──────────────────┘           │              │               │            ║
-║               │ glu_output                   │   local_out  │               │            ║
-║               │                              │              │               │            ║
-║               └──────────────┬───────────────┴──────────────┘               │            ║
-║                              │                                              │            ║
-║                              ▼                                              │            ║
-║                   ┌──────────────────────┐                                  │            ║
-║                   │   Adaptive Mixing    │                                  │            ║
-║                   │ α·GLU + (1-α)·Local  │◄── α = σ(f(x) + α_bias(t))       │            ║
-║                   └──────────┬───────────┘                                  │            ║
-║                              │                                              │            ║
-║                              └──────────────────┬────────────────────────────┘            ║
-║                                                 │ + (residual)                           ║
-║                                                 ▼                                        ║
-║                                              Output                                       ║
-╚═══════════════════════════════════════════════════════════════════════════════════════════╝
+╔═════════════════════════════════════════════════════════════════════════════════════════════╗
+║                                      OssammaBlock                                            ║
+║       Oscillatory State Space Attention Masked Mixer Architecture                            ║
+╠═════════════════════════════════════════════════════════════════════════════════════════════╣
+║                                                                                             ║
+║   Input ──────────────────────────────────────────────────────────────────── Residual       ║
+║      │                                                                           │          ║
+║      ▼                                                                           │          ║
+║   ┌───────────────────────────────┐                                              │          ║
+║   │  Time-Conditioned LayerNorm   │◄── time_emb                                  │          ║
+║   │   (scale, shift, α_bias)      │                                              │          ║
+║   └───────────────┬───────────────┘                                              │          ║
+║                   │ x_norm                                                       │          ║
+║      ┌────────────┴────────────┐                                                 │          ║
+║      │                         │                                                 │          ║
+║      ▼                         │                                                 │          ║
+║ ┌────────────────────────────────────────────────┐                               │          ║
+║ │         Global-Spectral GLU Branch             │                               │          ║
+║ │                                                │                               │          ║
+║ │   Dense(d→2d)                                  │                               │          ║
+║ │       │                                        │                               │          ║
+║ │       ├─────────────┬────────────┐             │                               │          ║
+║ │   content_half   gate_half       │             │                               │          ║
+║ │       │              │           │             │                               │          ║
+║ │       ▼              ▼           │             │                               │          ║
+║ │  ┌──────────┐  ┌──────────┐      │             │                               │          ║
+║ │  │ Linear   │  │ DLinOSS  │      │             │                               │          ║
+║ │  │ Attention│  │(Oscillator│     │             │                               │          ║
+║ │  │          │  │   SSM)    │     │             │                               │          ║
+║ │  └────┬─────┘  └────┬─────┘      │             │                               │          ║
+║ │       │             │            │             │                               │          ║
+║ │   RMSNorm       RMSNorm          │  ◄── NEW: Stabilize before GLU gating       │          ║
+║ │       │             │            │             │                               │          ║
+║ │       │         sigmoid          │             │                               │          ║
+║ │       │             │            │             │                               │          ║
+║ │       └──────⊙──────┘  (gate)    │             │                               │          ║
+║ │              │                   │             │                               │          ║
+║ └──────────────┼───────────────────┘             │                               │          ║
+║                │ glu_output                      │                               │          ║
+║                │                                 │                               │          ║
+║                ├─────────────────────────────────┤                               │          ║
+║                │                                 │                               │          ║
+║                │                                 ▼                               │          ║
+║                │                    ┌─────────────────────────┐                  │          ║
+║                │                    │       InputGate         │                  │          ║
+║                │                    │  σ(Dense(glu_output))   │                  │          ║
+║                │                    └───────────┬─────────────┘                  │          ║
+║                │                                │                                │          ║
+║                │                                ▼                                │          ║
+║                │                    ┌─────────────────────────┐                  │          ║
+║                │                    │   Local-Sharp Branch    │                  │          ║
+║                │                    │                         │                  │          ║
+║                │                    │   x_norm ⊙ input_gate   │                  │          ║
+║                │                    │          ↓              │                  │          ║
+║                │                    │     SWAttention         │                  │          ║
+║                │                    │   (Sliding Window)      │                  │          ║
+║                │                    └───────────┬─────────────┘                  │          ║
+║                │                                │                                │          ║
+║                └────────────┬───────────────────┘                                │          ║
+║                             │                                                    │          ║
+║                             ▼                                                    │          ║
+║                  ┌────────────────────────┐                                      │          ║
+║                  │  Token-wise Mixing     │                                      │          ║
+║                  │  α_t·GLU + (1-α_t)·Loc │◄── α_t = σ(Wα·h_t + α_bias(t))       │          ║
+║                  │  (per-token mixing)    │    (NEW: position-dependent α)       │          ║
+║                  └───────────┬────────────┘                                      │          ║
+║                              │                                                   │          ║
+║                              ▼                                                   │          ║
+║                  ┌────────────────────────┐                                      │          ║
+║                  │        Dropout         │                                      │          ║
+║                  └───────────┬────────────┘                                      │          ║
+║                              │                                                   │          ║
+║                              ▼                                                   │          ║
+║                  ┌────────────────────────┐                                      │          ║
+║                  │      SwiGLU FFN        │                                      │          ║
+║                  │  Dense(d→3d/2) → split │                                      │          ║
+║                  │  swish(a)⊙b → Dense    │                                      │          ║
+║                  └───────────┬────────────┘                                      │          ║
+║                              │                                                   │          ║
+║                              └───────────────────────────────┬───────────────────┘          ║
+║                                                              │ + (residual)                 ║
+║                                                              ▼                              ║
+║                                                   ┌────────────────────────┐                ║
+║                                                   │       LayerNorm        │                ║
+║                                                   └───────────┬────────────┘                ║
+║                                                               │                             ║
+║                                                               ▼                             ║
+║                                                            Output                           ║
+╚═════════════════════════════════════════════════════════════════════════════════════════════╝
 ```
 
 ### Key Components
@@ -119,6 +155,8 @@ The main model to be trained is **LLaDAModel** - a discrete text diffusion langu
 |-----------|-------------|
 | **DLinOSS** | Damped oscillators with ρ·R(θ) rotation, selective Δt |
 | **LinearAttention** | O(L) complexity, ELU+1 feature map |
+| **RMSNorm** | Root Mean Square normalization before GLU gating (stabilizes training) |
+| **Token-wise α** | Per-token mixing: α_t = σ(Wα·h_t + bias), not sequence-global |
 | **SWAttention** | Local window softmax attention with causal masking |
 
 ### Training Mode (Text Diffusion)
@@ -1670,3 +1708,792 @@ Quality (estimated):
 - **Mask-Predict**: Ghazvininejad et al., ["Mask-Predict: Parallel Decoding"](https://arxiv.org/abs/1904.09324) (EMNLP 2019)
 - **MaskGIT**: Chang et al., ["MaskGIT: Masked Generative Image Transformer"](https://arxiv.org/abs/2202.04200) (CVPR 2022)
 - **Discrete Diffusion**: Austin et al., ["Structured Denoising Diffusion Models in Discrete State-Spaces"](https://arxiv.org/abs/2107.03006) (NeurIPS 2021)
+
+---
+
+## Deep Scaling Strategies (DeepScaling.jl)
+
+Ossamma's O(T) complexity (vs Transformer's O(T²)) allows **4-8× more layers** for the same compute budget. The DeepScaling module implements strategies to leverage this advantage.
+
+### Core Insight: Depth vs Width Trade-off
+
+```
+Transformer:  Layers = C / (T² × d)
+Ossamma:      Layers = C / (T × d²)
+
+Ratio = T / d
+
+For T=2048, d=512: Ossamma can afford 4× more layers
+For T=4096, d=512: Ossamma can afford 8× more layers
+```
+
+### 1. Hierarchical Frequency Ranges
+
+Different oscillator frequency ranges per layer depth:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Layer 1-12 (early):   freq ∈ [1.0, 100.0]  ← Fast oscillations │
+│                        Captures: local syntax, adjacent words   │
+│                                                                 │
+│  Layer 13-24 (mid):    freq ∈ [0.1, 22.0]   ← Medium            │
+│                        Captures: phrases, clauses               │
+│                                                                 │
+│  Layer 25-48 (late):   freq ∈ [0.02, 5.0]   ← Slow oscillations │
+│                        Captures: document-level, long-range     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Usage:**
+```julia
+using Ossamma
+
+# Configure hierarchical frequencies
+freq_config = HierarchicalFrequencyConfig(
+    base_min_freq = 0.01f0,
+    base_max_freq = 100.0f0,
+    decay_rate = 3.0f0,
+    scaling_type = :exponential  # or :linear, :logarithmic
+)
+
+# Get frequency range for a specific layer
+min_freq, max_freq = compute_layer_frequencies(24, 48, freq_config)
+
+# Print summary
+frequency_summary(48, freq_config)
+```
+
+**Scaling Types:**
+| Type | Behavior | Best For |
+|------|----------|----------|
+| `:exponential` | Fast decay early, slow late | Most cases |
+| `:linear` | Uniform transition | Moderate depth |
+| `:logarithmic` | Gradual decay | Very deep (96+) |
+
+### 2. Layer Scale Initialization
+
+Stabilizes very deep networks by scaling residual contributions:
+
+```julia
+# residual + layer_scale * block_output
+# where layer_scale starts small and is learnable
+```
+
+**Configuration:**
+```julia
+scale_config = LayerScaleConfig(
+    init_value = 0.1f0,    # Starting scale (smaller for deeper)
+    learnable = true,       # Allow scale to be learned
+    per_channel = true      # Per-dimension vs scalar
+)
+```
+
+**Recommended init values:**
+| Depth | init_value |
+|-------|------------|
+| 24L | 0.1 |
+| 48L | 0.1 |
+| 96L | 0.01 |
+| 192L | 1e-4 |
+
+### 3. Stochastic Depth (Drop Path)
+
+Regularization by randomly skipping layers during training:
+
+```julia
+depth_config = StochasticDepthConfig(
+    drop_rate = 0.1f0,     # Max drop probability (for deepest layer)
+    mode = :linear         # or :uniform
+)
+
+# Linear mode: Layer 1 = 0% drop, Layer 48 = 10% drop
+# Uniform mode: All layers = 10% drop
+```
+
+**Benefits:**
+- Regularization (prevents overfitting)
+- Faster training (fewer layers computed)
+- Implicit ensemble effect
+
+### 4. Gradient Checkpointing
+
+Memory-efficient training by recomputing activations:
+
+```julia
+checkpoint_config = CheckpointConfig(
+    checkpoint_every = 4,   # Checkpoint every 4 layers
+    enabled = true
+)
+
+# Memory reduction:
+# 48L without checkpoint: 48 × activations
+# 48L with checkpoint (every 4): 12 × activations + recompute
+```
+
+### 5. OssammaBlockDeep
+
+Deep-optimized block variant with all strategies built-in:
+
+```julia
+block = OssammaBlockDeep(
+    384,                  # embedding_dimension
+    4096,                 # sequence_length
+    6,                    # number_of_heads
+    64;                   # time_dimension
+    layer_idx = 24,
+    total_layers = 48,
+    block_type = :global_only,  # :full, :global_only, :local_only
+    freq_config = HierarchicalFrequencyConfig(),
+    use_layer_scale = true,
+    layer_scale_init = 0.1f0,
+    use_stochastic_depth = true,
+    stochastic_depth_rate = 0.1f0,
+    use_parallel_scan = true,
+)
+```
+
+**Block Types:**
+| Type | Components | Use Case |
+|------|------------|----------|
+| `:full` | LinearAttn + DLinOSS + SWAttention | Full expressivity |
+| `:global_only` | LinearAttn + DLinOSS | Semantic layers |
+| `:local_only` | SWAttention only | Syntax layers |
+
+### 6. Block Type Schedules
+
+Different layer types at different depths:
+
+```julia
+# PROGRESSIVE: local → global → full
+# Early layers: :local_only (syntax)
+# Mid layers: :global_only (semantics)
+# Late layers: :full (integration)
+
+# SANDWICH: full at edges, lightweight in middle
+# First/last 15%: :full
+# Middle: :global_only
+
+# ALTERNATING: cycle through types
+# Every 4th: :full
+# Even: :global_only
+# Odd: :local_only
+```
+
+### 7. Deep Model Configurations
+
+Pre-built configurations for common use cases:
+
+```julia
+# 48-layer deep model (~120M params)
+config = deep_48L_config(
+    vocab_size = 32000,
+    max_sequence_length = 4096
+)
+
+# 96-layer ultra-deep (~100M params)
+config = ultra_96L_config()
+
+# Long context optimized (16K+ sequences)
+config = long_context_config(
+    max_sequence_length = 16384
+)
+
+# Create blocks from config
+blocks = create_deep_blocks(config)
+
+# Print summary
+print_model_summary(config)
+```
+
+### Configuration Comparison
+
+| Config | Layers | Dim | Heads | Params | Best For |
+|--------|--------|-----|-------|--------|----------|
+| `deep_48L` | 48 | 384 | 6 | ~120M | Starting point |
+| `ultra_96L` | 96 | 256 | 4 | ~100M | Research |
+| `long_context` | 32 | 512 | 8 | ~130M | 16K+ sequences |
+
+### Example: Building a Deep Ossamma Model
+
+```julia
+using Ossamma
+using Lux
+using Random
+
+# Create configuration
+config = deep_48L_config(vocab_size = 32000)
+
+# Print summary
+print_model_summary(config)
+
+# Create blocks
+blocks = create_deep_blocks(config)
+
+# Initialize
+rng = Random.default_rng()
+params = [Lux.initialparameters(rng, b) for b in blocks]
+states = [Lux.initialstates(rng, b) for b in blocks]
+
+# Forward pass with checkpointing (pseudo-code)
+hidden = embeddings
+time_emb = sinusoidal_embedding(t)
+
+for (i, (block, ps, st)) in enumerate(zip(blocks, params, states))
+    if should_checkpoint(i, CheckpointConfig())
+        hidden, st = Zygote.checkpointed(block, (hidden, time_emb), ps, st)
+    else
+        hidden, st = block((hidden, time_emb), ps, st)
+    end
+    states[i] = st
+end
+```
+
+### Performance Expectations
+
+| Mode | GPU Util | Speed |
+|------|----------|-------|
+| Sequential OSSM | 30-35% | 7-10 sec/step |
+| Parallel Scan | 80-90% | 0.5-1 sec/step |
+| + Diffusion | 80-90% | 8-16× faster generation |
+
+### References
+
+- **Layer Scale**: Touvron et al., ["Going deeper with Image Transformers"](https://arxiv.org/abs/2103.17239) (CaiT, 2021)
+- **Stochastic Depth**: Huang et al., ["Deep Networks with Stochastic Depth"](https://arxiv.org/abs/1603.09382) (ECCV 2016)
+- **Gradient Checkpointing**: Chen et al., ["Training Deep Nets with Sublinear Memory Cost"](https://arxiv.org/abs/1604.06174) (2016)
+
+---
+
+## TiDAR: Speculative Decoding with Granite (TiDAR.jl & Drafter.jl)
+
+TiDAR (Token-level Iterative Drafting with AR Refinement) implements speculative decoding
+that pairs a fast, lightweight **OssammaDrafter** model with a large **Granite** autoregressive verifier.
+
+### High-Level System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           TiDAR Generation Loop                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ┌─────────────────┐                      ┌─────────────────────────┐      │
+│   │  OssammaDrafter │                      │   Granite AR Verifier   │      │
+│   │  (~40-100M)     │                      │   (2B/3B/8B params)     │      │
+│   │                 │                      │                         │      │
+│   │  • O(T) complex │──── K tokens ───────>│  • O(T²) attention      │      │
+│   │  • Parallel     │     drafted          │  • Sequential           │      │
+│   │  • Diffusion    │                      │  • High quality         │      │
+│   └────────┬────────┘                      └───────────┬─────────────┘      │
+│            │                                           │                    │
+│            │ [MASK] → predictions                      │ verify logits      │
+│            │                                           │                    │
+│            v                                           v                    │
+│   ┌────────────────────────────────────────────────────────────────┐        │
+│   │                    Rejection Sampling                          │        │
+│   │  • Compare drafter vs verifier predictions                     │        │
+│   │  • Accept: matching tokens (or p_ar/p_draft sampling)          │        │
+│   │  • Reject: use verifier token, re-draft from that point        │        │
+│   └────────────────────────────────────────────────────────────────┘        │
+│                               │                                             │
+│                               v                                             │
+│                     [accepted tokens appended]                              │
+│                               │                                             │
+│                         (loop until EOS)                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### OssammaDrafter Full Architecture
+
+The drafter is built from **OssammaDrafterBlock** layers with time conditioning for diffusion:
+
+```
+                              token_ids (seq_len, batch)
+                                        │
+                                        v
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                           TOKEN EMBEDDING                                     │
+│                     Embedding(vocab_size → d)                                 │
+│                     vocab = 49155 (Granite 3.1) or 49160 (Granite 4.0)        │
+└───────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        v
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                         POSITION EMBEDDING                                    │
+│                     Embedding(max_seq_len → d)                                │
+└───────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        + (elementwise add)
+                                        │
+                                        v
+                              hidden (d, seq, batch)
+                                        │
+┌───────────────────────────────────────┴───────────────────────────────────────┐
+│                                                                               │
+│         t ∈ [0,1]                     │                                       │
+│             │                         │                                       │
+│             v                         │                                       │
+│   ┌─────────────────────┐             │                                       │
+│   │ SINUSOIDAL TIME EMB │             │                                       │
+│   │  sin/cos encoding   │             │                                       │
+│   │  (time_dim = 64)    │             │                                       │
+│   └─────────┬───────────┘             │                                       │
+│             │                         │                                       │
+│             v                         │                                       │
+│   ┌─────────────────────┐             │                                       │
+│   │ TIME MLP EMBEDDING  │             │                                       │
+│   │ Dense → GELU → Dense│             │                                       │
+│   │ (time_dim → d)      │             │                                       │
+│   └─────────┬───────────┘             │                                       │
+│             │                         │                                       │
+│   sinusoidal_emb (for blocks)         │                                       │
+│             │                         │                                       │
+└─────────────┼─────────────────────────┼───────────────────────────────────────┘
+              │                         │
+              v                         v
+        ╔═════════════════════════════════════════════════════════════════╗
+        ║                  N × OssammaDrafterBlock                        ║
+        ║         (6-96 layers depending on configuration)                ║
+        ╚═════════════════════════════════════════════════════════════════╝
+                                        │
+                                        v
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                            FINAL LAYERNORM                                    │
+└───────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        v
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                              LM HEAD                                          │
+│                         Dense(d → vocab_size)                                 │
+└───────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        v
+                           logits (vocab, seq, batch)
+```
+
+### OssammaDrafterBlock (Single Block Detail)
+
+Each block uses GLU-style gating between LinearAttention and DLinOSS:
+
+```
+                    Input (d, seq, batch)
+                            │
+            ┌───────────────┴───────────────┐
+            │                               │ (residual connection)
+            v                               │
+┌───────────────────────────────┐           │
+│  TIME-CONDITIONED LAYERNORM   │           │
+│                               │           │
+│  LN(x) → scale(t)·x + shift(t)│◄──── t (time embedding)
+│                               │           │
+│  Also outputs α_bias (unused  │           │
+│  in Drafter - used in full    │           │
+│  Ossamma for branch mixing)   │           │
+└───────────────────────────────┘           │
+            │                               │
+            v                               │
+┌───────────────────────────────┐           │
+│     GLU PROJECTION            │           │
+│     Dense(d → 2d)             │           │
+└───────────────────────────────┘           │
+            │                               │
+      ┌─────┴─────┐                         │
+      │   split   │                         │
+      v           v                         │
+   path_a      path_b                       │
+   (d,seq)     (d,seq)                      │
+      │           │                         │
+      v           v                         │
+┌───────────┐ ┌───────────────────┐         │
+│  LINEAR   │ │     DLinOSS       │         │
+│ ATTENTION │ │ (Oscillator SSM)  │         │
+│           │ │                   │         │
+│ O(n) glob │ │ Sequential state  │         │
+│ context   │ │ space model with  │         │
+│           │ │ damped harmonic   │         │
+│ Q,K,V,O   │ │ oscillators       │         │
+│ projections│ │                  │         │
+└─────┬─────┘ └─────────┬─────────┘         │
+      │                 │                   │
+      │            sigmoid(·)               │
+      │                 │                   │
+      └────── ⊙ ────────┘                   │
+              │                             │
+      (Hadamard product)                    │
+              │                             │
+              v                             │
+┌───────────────────────────────┐           │
+│          DROPOUT              │           │
+└───────────────────────────────┘           │
+              │                             │
+              v                             │
+┌───────────────────────────────┐           │
+│         SwiGLU FFN            │           │
+│                               │           │
+│  Dense(d → 1.5d) → split      │           │
+│       SiLU(a) ⊙ b             │           │
+│  Dense(1.5d/2 → d)            │           │
+└───────────────────────────────┘           │
+              │                             │
+              └──────── + ──────────────────┘
+                        │
+                        v
+┌───────────────────────────────┐
+│      OUTPUT LAYERNORM         │
+└───────────────────────────────┘
+                        │
+                        v
+               Output (d, seq, batch)
+```
+
+### Key Components Explained
+
+#### 1. LinearAttention (O(n) Global Context)
+- Provides **global context** across the sequence without O(n²) cost
+- Uses linear attention mechanism (no softmax)
+- Processes `path_a` from the GLU split
+
+#### 2. DLinOSS (Oscillatory State Space Model)
+- **Diagonal Linear Oscillatory State Space** model
+- Models temporal dependencies via damped harmonic oscillators
+- Each oscillator has learnable frequency `ω` and damping `α`
+- Update: `x_t = ρ·R(θ)·x_{t-1} + B·u_t` where:
+  - `ρ = exp(-α·Δt)` (damping)
+  - `θ = ω·Δt` (rotation angle)
+- Provides **sequential memory** that complements global attention
+
+#### 3. GLU Gating
+```
+output = LinearAttention(path_a) ⊙ sigmoid(DLinOSS(path_b))
+```
+- Oscillator output gates the attention output
+- Sigmoid provides soft gating ∈ (0, 1)
+
+#### 4. Time Conditioning (for Diffusion)
+- Drafter uses diffusion-style prediction: `t=0` means "predict all masks"
+- Sinusoidal embeddings encode timestep `t ∈ [0, 1]`
+- LayerNorm is modulated by time: `scale(t)·LN(x) + shift(t)`
+
+### Granite Verifier Role
+
+**Granite** is IBM's open-source LLM family used as the AR verifier:
+
+| Model | Params | Hidden | Layers | Vocab |
+|-------|--------|--------|--------|-------|
+| Granite 3.1 2B | 2B | 2048 | 40 | 49155 |
+| Granite 3B MoE | 3B (800M active) | 1536 | 32 | 49155 |
+| Granite 4.0 | varies | varies | varies | 49160 |
+| Granite 8B | 8B | 4096 | 32 | 49155 |
+
+**Critical**: Drafter vocabulary **must match** verifier vocabulary exactly.
+
+### TiDAR Generation Flow
+
+```
+Step 1: DRAFTING
+────────────────
+prefix = [token₁, token₂, ..., tokenₙ]
+                    │
+                    v
+input = [token₁, token₂, ..., tokenₙ, [MASK], [MASK], ..., [MASK]]
+                                       ╰───────── K masks ─────────╯
+                    │
+                    v
+            OssammaDrafter(input, t=0)
+                    │
+                    v
+            logits → sample → [draft₁, draft₂, ..., draftₖ]
+
+
+Step 2: VERIFICATION
+────────────────────
+full_seq = [token₁, ..., tokenₙ, draft₁, ..., draftₖ]
+                    │
+                    v
+            GraniteVerifier(full_seq)
+                    │
+                    v
+            verifier_logits
+
+
+Step 3: ACCEPTANCE (Rejection Sampling)
+───────────────────────────────────────
+For i = 1 to K:
+  │
+  ├─ p_draft = drafter_probs[draft_i]
+  ├─ p_verifier = verifier_probs[draft_i]
+  │
+  ├─ acceptance_prob = min(1, p_verifier / p_draft)
+  │
+  └─ if rand() < acceptance_prob:
+        ACCEPT draft_i
+     else:
+        REJECT → use verifier's token, stop
+
+
+Step 4: RESULT
+──────────────
+new_prefix = [token₁, ..., tokenₙ, accepted_drafts..., (verifier_token if rejected)]
+                    │
+              (loop to Step 1)
+```
+
+### Configuration Hierarchy
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        TiDARConfig                              │
+├─────────────────────────────────────────────────────────────────┤
+│  ar_model: "granite_3b" | "granite_8b" | "granite4_3b"          │
+│  vocab_size: 49155 (Granite 3.1) or 49160 (Granite 4.0)         │
+│  mask_token_id: vocab_size (uses last token position)           │
+├─────────────────────────────────────────────────────────────────┤
+│  DRAFTER ARCHITECTURE                                           │
+│  ├─ embedding_dimension: 384 (narrow for speed)                 │
+│  ├─ number_of_layers: 24-96 (deep due to O(T) complexity)       │
+│  ├─ number_of_heads: 6                                          │
+│  └─ max_sequence_length: 4096-8192                              │
+├─────────────────────────────────────────────────────────────────┤
+│  DEEP SCALING OPTIMIZATIONS                                     │
+│  ├─ HierarchicalFrequencyConfig: layer-wise oscillator freqs    │
+│  ├─ LayerScale: learnable per-layer output scaling (init=0.1)   │
+│  └─ StochasticDepth: random layer dropping during training      │
+├─────────────────────────────────────────────────────────────────┤
+│  INFERENCE SETTINGS                                             │
+│  ├─ draft_length: 8-12 tokens per step                          │
+│  ├─ temperature: 0.9                                            │
+│  └─ confidence_threshold: 0.8                                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Why This Architecture?
+
+1. **Speed**: Drafter uses O(T) complexity (DLinOSS + LinearAttention), enabling 48-96 layers where a Transformer would be impractical
+
+2. **Quality**: Granite verifier ensures output quality matches the large model
+
+3. **Efficiency**: Most tokens are accepted, so the slow verifier runs infrequently
+
+4. **Parallel Drafting**: Unlike AR models, drafter predicts K tokens simultaneously
+
+### Why Deep Ossamma for TiDAR?
+
+| Aspect | Transformer Drafter | Ossamma Drafter |
+|--------|---------------------|-----------------|
+| Complexity | O(T² × d) | **O(T × d²)** |
+| Layers for 80M params | 12L × 512d | **48L × 384d** |
+| Parallel draft | Limited | **Full (diffusion)** |
+| GPU utilization | 80% | **80%+ (parallel scan)** |
+
+### Quick Start
+
+```julia
+using Ossamma
+
+# Create deep drafter for Granite 3B
+config = granite_3b_drafter_deep_config()
+print_tidar_config(config)
+
+# Create model
+drafter = OssammaDrafterDeep(config)
+
+# Initialize
+rng = Random.default_rng()
+params = Lux.initialparameters(rng, drafter)
+state = Lux.initialstates(rng, drafter)
+
+# Draft tokens
+prefix = [1, 2, 3, 4, 5]  # Token IDs
+drafted_ids, logits, new_state = draft_tokens(
+    drafter, prefix, 8, params, state;
+    temperature = 0.9f0
+)
+```
+
+### TiDAR Inference Loop
+
+```julia
+# Pseudo-code for full TiDAR generation
+
+function tidar_generate(drafter, verifier, prompt_ids, max_length)
+    prefix = prompt_ids
+    drafter_state = initial_state
+
+    while length(prefix) < max_length
+        # One TiDAR step
+        prefix, accepted, drafter_state = tidar_generate_step(
+            drafter, drafter_params, drafter_state,
+            verifier,  # Function: ids -> logits
+            prefix,
+            config.draft_length;
+            temperature = config.temperature
+        )
+
+        # Stats
+        total_tokens += accepted + 1  # accepted + verifier's correction
+    end
+
+    return prefix
+end
+```
+
+### Configuration Options
+
+```julia
+# Standard drafter (24L, ~50M params)
+config = granite_3b_drafter_config()
+
+# Deep drafter (48L, ~80M params) - recommended
+config = granite_3b_drafter_deep_config()
+
+# Custom configuration
+config = TiDARConfig(
+    ar_model = "granite_3b",
+    vocab_size = GRANITE_VOCAB_SIZE,  # 49155
+    embedding_dimension = 384,
+    number_of_layers = 48,
+    number_of_heads = 6,
+    max_sequence_length = 4096,
+
+    # Deep scaling
+    use_layer_scale = true,
+    layer_scale_init = 0.1f0,
+    use_stochastic_depth = true,
+    stochastic_depth_rate = 0.1f0,
+    freq_config = HierarchicalFrequencyConfig(
+        base_min_freq = 0.01f0,
+        base_max_freq = 100.0f0,
+        scaling_type = :exponential
+    ),
+
+    # TiDAR settings
+    draft_length = 12,
+    confidence_threshold = 0.8f0,
+    temperature = 0.9f0,
+)
+```
+
+### Drafter Model Variants
+
+| Config Function | Layers | Dim | Params | Best For |
+|-----------------|--------|-----|--------|----------|
+| `granite_2b_drafter_config()` | 24 | 384 | ~40M | Granite 2B verifier |
+| `granite_3b_drafter_config()` | 32 | 384 | ~60M | Granite 3B verifier |
+| `granite_4_3b_drafter_config()` | 32 | 384 | ~60M | Granite 4.0 verifier |
+| `granite_8b_drafter_config()` | 48 | 384 | ~80M | Granite 8B verifier |
+| `granite_drafter_deep_config()` | 48-96 | 384 | ~80-100M | Maximum acceptance |
+
+### Expected Performance
+
+| Metric | Value |
+|--------|-------|
+| Drafter params | ~40-100M |
+| Verifier params | 2B-8B (Granite) |
+| Draft length | 8-12 tokens |
+| Acceptance rate | ~60-80% |
+| Speedup vs AR | **2-4×** |
+
+### Training the Drafter
+
+The drafter is trained with MLM loss on the same data as the verifier:
+
+```julia
+using Ossamma
+
+# Create drafter
+config = granite_3b_drafter_deep_config()
+drafter = OssammaDrafterDeep(config)
+
+# Training config
+train_config = DrafterTrainingConfig(
+    learning_rate = 1e-4,
+    batch_size = 32,
+    mask_ratio = 0.15,  # 15% tokens masked
+    # ...
+)
+
+# Training loop uses drafter_mlm_loss from DrafterTraining module
+```
+
+### Key Differences: OssammaDrafter vs Full OssammaBlock
+
+| Feature | Full OssammaBlock | OssammaDrafterBlock |
+|---------|-------------------|---------------------|
+| SWAttention (local) | ✓ | ✗ (verifier handles local) |
+| α-mixing gating | ✓ | ✗ (standard residual) |
+| Branches | 2 (Global + Local) | 1 (Global only) |
+| Use case | General LM | Fast drafting |
+
+### References
+
+- **Speculative Decoding**: Leviathan et al., ["Fast Inference from Transformers via Speculative Decoding"](https://arxiv.org/abs/2211.17192) (ICML 2023)
+- **TiDAR (conceptual basis)**: Token-level iterative draft and refine
+- **Granite Models**: IBM's Granite 3.1/4.0 family
+
+---
+
+## NER Model Benchmark Findings (2024-12-28)
+
+### Checkpoint: `checkpoints/ner_110m/checkpoint_best.jls`
+
+**Model Architecture** (from checkpoint step 48500):
+| Parameter | Value |
+|-----------|-------|
+| Embedding Dimension | 640 |
+| Number of Layers | 10 |
+| Number of Heads | 10 |
+| Time Dimension | 192 |
+| State Dimension | 640 |
+| Window Size | 32 |
+| Max Sequence Length | 256 |
+| FFN Expansion | 1.334375 |
+| Vocab Size | 2004 |
+
+**Speed Benchmark** (CPU only, no GPU):
+- Throughput: **15.3 tokens/sec** (1.5 sentences/sec)
+- Average inference time: **653ms ± 132ms** per sentence
+
+**Accuracy Benchmark**:
+- F1 Score: **0%**
+- Recall: 0%
+- Precision: 0%
+
+### Root Cause: Synthetic Vocabulary
+
+The model was trained with the `--synthetic` flag, which generates placeholder tokens:
+```julia
+# From generate_synthetic_data() in train_ner_production.jl:269
+tokens = ["token_$i" for i in rand(1:vocab_size, seq_len)]
+```
+
+**Vocab Contents** (from checkpoint):
+```
+"token_1406" => 210
+"token_1202" => 325
+"token_1032" => 1681
+...
+```
+
+This means:
+1. All real English words map to `[UNK]` (token ID 2)
+2. The model only learned patterns on synthetic token IDs
+3. Embeddings are random for real language input
+4. The checkpoint is **not usable for real NER tasks**
+
+### Required Actions
+
+To make the NER model functional:
+
+1. **Retrain with real data**: Use `data/rag/synthetic_work.jsonl` (contains actual English words despite the name):
+   ```bash
+   julia --project=. scripts/train_ner_production.jl  # Without --synthetic flag
+   ```
+
+2. **Ensure data path exists**: The training script falls back to synthetic data if `config.data_dir` doesn't exist
+
+3. **Build proper vocabulary**: From the actual training corpus using `build_vocab()` function
+
+### Files Modified for Benchmark
+
+- `scripts/benchmark_ner.jl` - NER speed/accuracy benchmark
+- `scripts/debug_predictions.jl` - Debugging script for model outputs
+- `scripts/train_ner_production.jl` - Added `use_ffn`/`ffn_expansion` fields to `TrainingConfig` for checkpoint compatibility

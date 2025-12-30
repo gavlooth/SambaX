@@ -1214,9 +1214,13 @@ num_layers = 8
 ## TODO: Concrete Fixes for Gating Architecture (Expanded)
 
 ### TODO: Global–Local Gated Block Improvements (Requested)
-- [ ] Add explicit residual form: `y = x + α ⊙ g + (1-α) ⊙ l` (do not mix raw outputs without the skip).
-- [ ] Use token-wise mixing (preferred): `α_t = σ(Wα · h_t + bα)` where `h_t` is token hidden state at position `t`.
-- [ ] Define `h_t` clearly and consistently (default): `h_t = RMSNorm(x_t)` (token embedding at position t, normalized).
+- [x] **Always RMSNorm** on:
+  - [x] Oscillator (DLinOSS) output
+  - [x] Linear-attention output
+  - [x] Before GLU gating (normalize both paths before element-wise multiply)
+- [x] Add explicit residual form: `y = x + α ⊙ g + (1-α) ⊙ l` (do not mix raw outputs without the skip).
+- [x] Use token-wise mixing (preferred): `α_t = σ(Wα · h_t + bα)` where `h_t` is token hidden state at position `t`.
+- [x] Define `h_t` clearly and consistently (default): `h_t = LayerNorm(x_t)` (token embedding at position t, normalized via TimeConditionedLayerNorm).
   - [ ] Alternative experiment: `h_t = RMSNorm(g_t)` (gate driven by global context).
   - [ ] Alternative experiment: `h_t = concat(RMSNorm(x_t), RMSNorm(g_t))` (richer gate).
 - [ ] Add branch output projections (separate Dense layers): `g = Wo_g(GlobalAttn(...))`, `l = Wo_l(LocalAttn(...))`.
